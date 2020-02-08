@@ -1,5 +1,6 @@
 <!-- MarkdownTOC levels="1,2,3" autolink="true" -->
 
+- [Installing](#installing)
 - [Introduction](#introduction)
     - [Define class](#define-class)
     - [Define table](#define-table)
@@ -19,6 +20,25 @@
 
 <!-- /MarkdownTOC -->
 
+# Installing
+```
+pip install pgsql-table
+```
+Importing
+```python
+import sql
+
+class Foo:
+    def __init__(ID=None, name=None):
+        self.ID = ID
+        self.name = name
+
+class Table(sql.Table)
+    type = Foo
+    fields = {
+        "name": {}
+    }
+```
 
 # Introduction
 
