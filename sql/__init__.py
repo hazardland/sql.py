@@ -27,33 +27,26 @@ class Error(Exception):
         else:
             self.message = message
         self.field = field
-        print(color.red(self.code+':'), color.yellow(self.message), color.blue(str(self.file)+':'+str(self.line)), color.green('['+self.field+']') if not self.field is None else '')
+        print(color.red(self.code+':'), color.yellow(self.message), color.cyan(str(self.file)+':'+str(self.line)), color.green('['+self.field+']') if not self.field is None else '')
         traceback.print_exc(file=sys.stdout)
 
 class Clause:
-    def __init__(self, fields, values, pattern='{name}', separator=', ', clause=''):
+    def __init__(self, fields, values, pattern='{name}', separator=', ', empty=''):
         self.__fields = fields
         self.__values = values
         self.__pattern = pattern
         self.__separator = separator
-        self.__clause = clause
-    def fields(self, pattern=None, clause=''):
+        self.__empty = empty
+    def fields(self, pattern=None):
         if pattern is None and self.__pattern is not None:
             pattern = self.__pattern
-        if len(self.__fields):
+        if self.__fields:
             return self.__separator.join(pattern.format(name=name) for name in self.__fields)
-        return ''
+        return self.__empty
     def values(self, ID=None):
         if ID is not None:
             return self.__values+list((ID,))
         return self.__values
-    def clause(self, empty=None):
-        fields = self.fields()
-        if fields:
-            return self.__clause+fields
-        if empty:
-            return self.__clause+empty
-        return ''
     def exctract(self):
         return self.__fields, self.__values
 
@@ -154,10 +147,10 @@ class Table:
                         values.append(cls.value(field, value))
                         fields.append(criteria)
 
-        return Clause(fields, values, separator=' AND ', clause='WHERE ')
+        return Clause(fields, values, separator=' AND ', empty='1=1')
 
     @classmethod
-    def order(cls, data=None, field=None, method=None, prefix=None, clause=True):
+    def order(cls, field, method=None, data=None, prefix=None):
         if data:
             if not 'field' in data:
                 return ''
@@ -190,9 +183,6 @@ class Table:
                 method = 'ASC'
         else:
             method = 'ASC'
-
-        if clause:
-            return 'ORDER BY '+column+' '+method
 
         return column+' '+method
 
@@ -234,7 +224,9 @@ class Table:
         config = cls.fields[field]
 
         # type casting
-        if 'type' not in config or config['type'] == 'string':
+        if value is None and 'null' in config and config['null']:
+            return None
+        elif 'type' not in config or config['type'] == 'string':
             value = str(value)
         elif config['type'] == 'int':
             value = int(value)
@@ -318,39 +310,55 @@ class Table:
         # if cls.name=='user_media':print(color.magenta(params))
         return cls.type(**params)
 
+class Row:
+    def __init__(self):
+        self.position = 0
+        self.offsets = {}
+        self.__data = None
+    def offset(self, name, count=1):
+        if hasattr(count, 'offset') and callable(count.offset):
+            count = count.offset()
+        self.offsets[name] = {}
+        self.offsets[name]['position'] = self.position
+        self.offsets[name]['count'] = count
+        self.position += count
+    def data(self, data):
+        #print('data', data)
+        self.__data = data
+    def get(self, name):
+        if self.offsets[name]['count'] > 1:
+            #print(name, self.offsets[name], self.__data[self.offsets[name]['position']:self.offsets[name]['position']+self.offsets[name]['count']])
+            return self.__data[self.offsets[name]['position']:self.offsets[name]['position']+self.offsets[name]['count']]
+        return self.__data[self.offsets[name]['position']]
+    def __call__(self, name):
+        return self.get(name)
+
 class Join():
     def __init__(self, *tables):
-        self.tables = tables
-
-    def select(self):
-        return ', '.join([table.select() for table in self.tables])
+        self.tables = []
+        self.prefixes = {}
+        for table in tables:
+            if isinstance(table, tuple):
+                self.tables.append(table[0])
+                self.prefixes[table[0].name] = table[1]
+            else:
+                self.tables.append(table)
+                self.prefixes[table.name] = ''
 
     def where(self, data):
         fields = []
         values = []
-        first = True
         for table in self.tables:
-            if first:
-                clause = table.where(data)
-                first = False
-            else:
-                clause = table.where(data, table.name+'.')
-            __fields, __values = clause.exctract()
+            where = table.where(data, self.prefixes[table.name])
+            __fields, __values = where.exctract()
             fields.extend(__fields)
             values.extend(__values)
 
-        return Clause(fields, values, separator=' AND ', clause='WHERE ')
+        return Clause(fields, values, separator=' AND ', empty='1=1')
 
-    def order(self, data=None, field=None, method=None):
-        first = True
+    def order(self, field, method=None, data=None):
         for table in self.tables:
-            if first:
-                order = table.order(data, field, method, clause=False)
-                if order:
-                    return 'ORDER BY '+order
-                first = False
-            else:
-                order = table.order(data, field, method, clause=False, prefix=table.name+'.')
-                if order:
-                    return 'ORDER BY '+order
+            order = table.order(field, method, data, prefix=self.prefixes[table.name])
+            if order:
+                return order
         return ''

@@ -8,7 +8,7 @@
 - [Usage](#usage)
     - [Insert](#insert)
         - [Using](#using)
-        - [Error checking](#error-checking)
+        - [Invalid value handling](#invalid-value-handling)
     - [Select](#select)
         - [Getting by ID](#getting-by-id)
         - [Getting by filter criterias](#getting-by-filter-criterias)
@@ -54,10 +54,9 @@ Imagine you have to store in database user profile object. You get following JSO
     "has_cats": False
 }
 ```
-Also user profile table has 25 other fields and we have another 37 tables. Are we going to list all of them in update queries? And what about selecting, filtering and converting them into objects?
 
 ## Define class
-First of all let us describe our profile object. Every time we select data from user profile we need to return objects of this class:
+First of all let us describe our profile object. Every time we select data from user profile we will to return objects of this class:
 ```python
 class Profile:
     def __init__(
@@ -82,7 +81,7 @@ class Profile:
 ```
 
 ## Define table
-Ok now let us describe table in JSON:
+Now let us describe the table in JSON:
 ```python
 import sql
 
@@ -173,8 +172,8 @@ CREATE TABLE user_profile
 ## Insert
 And finally we can advance to usage, let us create a function which creates a user profile:
 ```python
-#This are just hipotethical functions releasing free db connection from connection pool
 from sql import Error #I am not sure about this yet
+#get_db and put_db are just hipotethical functions releasing free db connection from connection pool
 from config import get_db, put_db
 
 def create(data):
@@ -202,7 +201,7 @@ def create(data):
 
 ```insert.fields()``` generates ```nickname, gender, interested_in, height, birthday, weight, has_cats``` string
 
-```insert.fields('%')``` generates ```%s, %s, %s, %s, %s, %s, %s```
+```insert.fields('%')``` generates ```%s, %s, %s, %s, %s, %s, %s``` (One %s for each insert field)
 
 ```Table.select()``` generates ```user_profile.nickname, user_profile.gender, user_profile.interested_in, user_profile.height, user_profile.birthday, user_profile.weight, user_profile.has_cats``` string
 
@@ -225,7 +224,7 @@ print(profile.__dict__)
 ```
 This will print ```{'ID': 20, 'nickname': 'XXX_()_XXX', 'gender': None, 'interested_in': ['friendship', 'dating'], 'birthday': datetime.datetime(2001, 7, 17, 0, 0), 'height': 169, 'weight': '69.99', 'has_cats': False}```
 
-### Error checking
+### Invalid value handling
 Allowed value checks:
 ```python
 try:
@@ -248,7 +247,6 @@ Prints ```invalid_value Invalid value being_sober for field gender```
 
 ## Select
 ### Getting by ID
-Getting single row is most trivial thing. You *do not have to list all select fields* by yourself and you *do not have to create object from returned row*:
 
 ```python
 def get(ID):
@@ -268,7 +266,7 @@ def get(ID):
 
     return profile
 ```
-The module used for executing queries is ```psycopg2``` which is well known library for working with Postgres in Python. We use parametrized query with a single parameter. One thing I want to note is **never forget comma in ```(ID,)``` after single parameter or you will kill database!**
+The module used for executing queries is ```psycopg2``` which is well known library for working with PostgreSQL in Python. We use parametrized query with a single parameter. One thing I want to note is **never forget comma in ```(ID,)``` after single parameter or you will kill database!**
 
 A little usage of ```get``` function:
 ```python
@@ -282,12 +280,12 @@ except Exception as error:
 ```
 
 ### Getting by filter criterias
-This is where lazy people should get happy. Imagine you have to filter and order some table with many columns in every possible way
+JSON definition allows to filter table data with any field within allowed values:
 ```python
 def get_all(criterias={}, order={}):
 
     where = Table.where(criterias)
-    print(where.clause('1=1'))
+    print(where.fields())
     print(where.values())
 
     total = None
@@ -296,9 +294,9 @@ def get_all(criterias={}, order={}):
         db = get_db()
         cursor = db.cursor()
         cursor.execute("SELECT "+Table.select()+", COUNT(*) OVER() "
-                       "FROM test.user_profile "+
-                       where.clause('1=1') + ' ' + # AND something=something
-                       Table.order(order, 'ID', 'desc'), #New order, default order field, default order method
+                       "FROM test.user_profile "
+                       "WHERE " + where.fields() + ' ' + # AND something=something
+                       "ORDER BY " + Table.order('ID', 'desc', order), #New order, default order field, default order method
                        where.values())
 
         while True:
@@ -306,7 +304,7 @@ def get_all(criterias={}, order={}):
                 data = cursor.fetchone()
                 if total is None:
                     total = data[Table.offset()]
-                profile = Table.create(cursor.fetchone())
+                profile = Table.create(data)
                 result.append(profile)
             except TypeError:
                 return result
@@ -352,24 +350,24 @@ print(json.dumps(result, default=json_dump))
 #[{"ID": [48], "nickname": "XXX_()_XXX", "gender": null, "interested_in": ["friendship", "dating"], "birthday": "2001-07-17 00:00:00", "height": 169, "weight": "69.99", "has_cats": false}, {"ID": [50], "nickname": "XXX_()_XXX", "gender": null, "interested_in": ["friendship", "dating"], "birthday": "2001-07-17 00:00:00", "height": 169, "weight": "69.99", "has_cats": false}]
 ```
 
-What does where.clause('1=1') do:
+What does where.fields() do:
 ```python
 where = Table.where(data)
-print(where.clause('1=1')
+print(where.fields()
 ```
 
-If data is empty it will output ```WHERE 1=1```. This is useful not to break query if generated where clause is followed by your custom ```AND my_custom=criteria```
+If data is empty it will output ```1=1```. This is useful for not breaking query in case if generated where clause is followed by your custom ```AND my_custom=criteria```
 
 If data is not empty, in case of our previous example it will output:
 ```
-WHERE user_profile."gender"=%s AND %s = ANY(user_profile."interested_in") AND %s = ANY(user_profile."interested_in") AND user_profile."birthday"<=%s AND user_profile."weight">=%s AND user_profile."weight"<=%s
+user_profile."gender"=%s AND %s = ANY(user_profile."interested_in") AND %s = ANY(user_profile."interested_in") AND user_profile."birthday"<=%s AND user_profile."weight">=%s AND user_profile."weight"<=%s
 ```
 
 For the same filter criteria data ```where.values()``` will output:
 ```
 ['female', 'friendship', 'dating', '2002-01-01 00:00:00', '45.0', '71.0']
 ```
-As result every ```%s``` in generated where clause has its own value.
+As a result every ```%s``` in generated where clause has its own value.
 
 ### Filtering options
 ```int```, ```float``` and ```date``` require ```"field_name":{"from":from_value, "to":to_value}```, or at least ```from``` or ```to```
@@ -389,12 +387,13 @@ result = get_all(order={'birthday','desc'})
 ```
 In case you do not pass order we have default order criteria specified in our select query as
 ```python
-Table.order(order, 'ID', 'desc')
+Table.order('ID', 'desc', order)
 ```
 Where ID is our field name. One of those keys defined in ```Table.fields``` (Not actual table field name, in case of id, id is table column name and ID is property name of Profile object)
 
 ## Update
 ### Creating update function
+Function will update only provided available fields with update permission and will return updated row on success. It will also execute only single query.
 ```python
 def save(ID, data):
     try:
@@ -422,6 +421,7 @@ def save(ID, data):
 ```
 
 ### Using update
+Take a note that only two fields are specified for update:
 ```python
 try:
     profile = save(20, {"gender":"female", "weight":45})
