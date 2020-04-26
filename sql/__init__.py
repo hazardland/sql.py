@@ -1,6 +1,7 @@
 import json
 from functools import wraps
 from dateutil.parser import parse as parse_date
+import logging as log
 
 class color():
     black = lambda x: '\033[30m' + str(x)+'\033[0;39m'
@@ -14,12 +15,6 @@ class color():
 
 class Error(Exception):
     def __init__(self, code, message=None, field=None):
-        import sys
-        import os
-        import inspect
-        import traceback
-        self.file = inspect.stack()[1][1].rpartition(os.path.sep)[2]
-        self.line = inspect.stack()[1][2]
         super(Error, self).__init__(code)
         self.code = code
         if message is not None and not isinstance(message, str):
@@ -27,8 +22,20 @@ class Error(Exception):
         else:
             self.message = message
         self.field = field
-        print(color.red(self.code+':'), color.yellow(self.message), color.cyan(str(self.file)+':'+str(self.line)), color.green('['+self.field+']') if not self.field is None else '')
-        traceback.print_exc(file=sys.stdout)
+
+        # import sys
+        # import os
+        # import inspect
+        # import traceback
+        # self.file = inspect.stack()[1][1].rpartition(os.path.sep)[2]
+        # self.line = inspect.stack()[1][2]
+        # print(color.red(self.code+':'), color.yellow(self.message), color.cyan(str(self.file)+':'+str(self.line)), color.green('['+self.field+']') if not self.field is None else '')
+        # traceback.print_exc(file=sys.stdout)
+
+        log.exception('%s %s %s',
+                      color.red(self.code+':'),
+                      color.yellow(self.message),
+                      color.green('['+self.field+']') if not self.field is None else '')
 
 class Clause:
     def __init__(self, fields, values, pattern='{name}', separator=', ', empty=''):
@@ -43,9 +50,9 @@ class Clause:
         if self.__fields:
             return self.__separator.join(pattern.format(name=name) for name in self.__fields)
         return self.__empty
-    def values(self, ID=None):
-        if ID is not None:
-            return self.__values+list((ID,))
+    def values(self, id=None):
+        if id is not None:
+            return self.__values+list((id,))
         return self.__values
     def exctract(self):
         return self.__fields, self.__values
@@ -66,17 +73,37 @@ FIELD OPTIONS
         }
     }
 '''
-class Table:
+
+class MetaTable(type):
+    def __repr__(cls):
+        return "<Table '"+str(cls)+"'>"
+    def __str__(cls):
+        return cls.str()
+    # def __iadd__(cls, other):
+    #     print("In __iadd_ with", other)
+    #     return str(other)+str(cls)
+    def __radd__(cls, other):
+        #print("In __radd_ with", other)
+        return str(other)+str(cls)
+    def __add__(cls, other):
+        #print("In __add_ with", other)
+        return str(cls)+str(other)
+    def __call__(cls, field):
+        if field not in cls.fields:
+            raise Error('unknown_field', 'Unknown field', field)
+        return '"'+cls.name+'"."'+(field if not 'field' in cls.fields[field] else cls.fields[field]['field'])+'"'
+
+class Table(metaclass=MetaTable):
     schema = None
     name = None
     fields = dict()
     type = lambda x: None
     @classmethod
-    def table(cls):
+    def str(cls):
         result = ''
         if cls.schema:
-            result += cls.schema+'.'
-        return result + cls.name
+            result += '"'+cls.schema+'".'
+        return result + '"'+cls.name+'"'
     """
         Returns an array for updating table
         update['fields'] = 'field1=%s, field2=%s'
@@ -120,9 +147,9 @@ class Table:
 
                 if 'array' in config and config['array']:
                     criteria = '%s = ANY('+cls.name+'."'+column+'")'
-                elif 'options' in config or config['type']=='bool':
+                elif 'options' in config or config['type'] == 'bool':
                     criteria = cls.name+'."'+column+'"=%s'
-                elif config['type']=='int' or config['type']=='date' or config['type']=='float':
+                elif config['type'] == 'int' or config['type'] == 'date' or config['type'] == 'float':
                     criteria = cls.name+'."'+column+'"=%s'
                 else:
                     value = value+'%'
@@ -136,7 +163,14 @@ class Table:
                         values.append(cls.value(field, parse))
                         fields.append(criteria)
                 else:
-                    if (config['type']=='int' or config['type']=='date' or config['type']=='float') and (isinstance(value, list) or isinstance(value, tuple) or isinstance(value, dict)) and ('from' in value or 'to' in value):
+                    if (config['type'] == 'int' or
+                        config['type'] == 'date' or
+                        config['type'] == 'float') and \
+                        (isinstance(value, list) or
+                         isinstance(value, tuple) or
+                         isinstance(value, dict)) and \
+                        ('from' in value or
+                         'to' in value):
                         if 'from' in value:
                             values.append(cls.value(field, value['from']))
                             fields.append(cls.name+'."'+column+"\">=%s")

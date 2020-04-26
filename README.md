@@ -10,13 +10,9 @@
         - [Using](#using)
         - [Invalid value handling](#invalid-value-handling)
     - [Select](#select)
-        - [Getting by ID](#getting-by-id)
+        - [Getting by id](#getting-by-id)
         - [Getting by filter criterias](#getting-by-filter-criterias)
         - [Filtering options](#filtering-options)
-        - [Ordering](#ordering)
-    - [Update](#update)
-        - [Creating update function](#creating-update-function)
-        - [Using update](#using-update)
 
 <!-- /MarkdownTOC -->
 
@@ -29,8 +25,8 @@ Importing
 import sql
 
 class Foo:
-    def __init__(ID=None, name=None):
-        self.ID = ID
+    def __init__(id=None, name=None):
+        self.id = id
         self.name = name
 
 class Table(sql.Table)
@@ -56,12 +52,12 @@ Imagine you have to store in database user profile object. You get following JSO
 ```
 
 ## Define class
-First of all let us describe our profile object. Every time we select data from user profile we will to return objects of this class:
+First of all let us describe our profile object. Every time we select data from user profile we want to return objects of this class:
 ```python
 class Profile:
     def __init__(
             self,
-            ID=None,
+            id=None,
             nickname=None,
             gender=None,
             interested_in=None,
@@ -70,7 +66,7 @@ class Profile:
             weight=None,
             has_cats=None
         ):
-        self.ID = ID, #Just avoiding "id" as it is builtin function
+        self.id = id, #Just avoiding "id" as it is builtin function
         self.nickname = nickname
         self.gender = gender
         self.interested_in = interested_in
@@ -86,11 +82,12 @@ Now let us describe the table in JSON:
 import sql
 
 class Table(sql.Table):
+    schema = 'test'
     name = 'user_profile' #Actual table name
     type = Profile #The class we described above
     fields = {
-        "ID":{
-            "field": "id", #Object property is "ID" but in table column is "id"
+        "id":{
+            "field": "id", #Object property is "id" but in table column is "id"
             "type": "int",
             "insert": False,
             "update": False
@@ -185,7 +182,7 @@ def create(data):
     try:
         db = get_db()
         cursor = db.cursor()
-        cursor.execute("INSERT INTO test.user_profile ("+insert.fields()+") " #List all insert fields
+        cursor.execute("INSERT INTO "+Table+" ("+insert.fields()+") " #List all insert fields
                        "VALUES("+insert.fields('%s')+") " #Instead of insert fields generate '%s' for fields
                        "RETURNING "+Table.select(), #Table.select() lists all fields having select=True (default)
                        insert.values())
@@ -222,7 +219,7 @@ profile = create({
     })
 print(profile.__dict__)
 ```
-This will print ```{'ID': 20, 'nickname': 'XXX_()_XXX', 'gender': None, 'interested_in': ['friendship', 'dating'], 'birthday': datetime.datetime(2001, 7, 17, 0, 0), 'height': 169, 'weight': '69.99', 'has_cats': False}```
+This will print ```{'id': 20, 'nickname': 'XXX_()_XXX', 'gender': None, 'interested_in': ['friendship', 'dating'], 'birthday': datetime.datetime(2001, 7, 17, 0, 0), 'height': 169, 'weight': '69.99', 'has_cats': False}```
 
 ### Invalid value handling
 Allowed value checks:
@@ -246,17 +243,17 @@ except Error as error:
 Prints ```invalid_value Invalid value being_sober for field gender```
 
 ## Select
-### Getting by ID
+### Getting by id
 
 ```python
-def get(ID):
-    if not ID:
+def get(id):
+    if not id:
         raise Error('missing_input')
 
     try:
         db = get_db()
         cursor = db.cursor()
-        cursor.execute("SELECT "+Table.select()+" FROM test.user_profile WHERE id=%s", (ID,))
+        cursor.execute("SELECT "+Table.select()+" FROM "+Table+" WHERE "+Table('id')+"=%s", (id,))
         profile = Table.create(cursor.fetchone())
     except Exception as error:
         raise Error('general_error')
@@ -266,7 +263,7 @@ def get(ID):
 
     return profile
 ```
-The module used for executing queries is ```psycopg2``` which is well known library for working with PostgreSQL in Python. We use parametrized query with a single parameter. One thing I want to note is **never forget comma in ```(ID,)``` after single parameter or you will kill database!**
+The module used for executing queries is ```psycopg2``` which is well known library for working with PostgreSQL in Python. We use parametrized query with a single parameter. One thing I want to note is **never forget comma in ```(id,)``` after single parameter or you will kill database!**
 
 A little usage of ```get``` function:
 ```python
@@ -294,9 +291,9 @@ def get_all(criterias={}, order={}):
         db = get_db()
         cursor = db.cursor()
         cursor.execute("SELECT "+Table.select()+", COUNT(*) OVER() "
-                       "FROM test.user_profile "
+                       "FROM "+Table+" "
                        "WHERE " + where.fields() + ' ' + # AND something=something
-                       "ORDER BY " + Table.order('ID', 'desc', order), #New order, default order field, default order method
+                       "ORDER BY " + Table.order('id', 'desc', order), #New order, default order field, default order method
                        where.values())
 
         while True:
@@ -347,7 +344,7 @@ result = get_all({
 print(json.dumps(result, default=json_dump))
 
 #It will print
-#[{"ID": [48], "nickname": "XXX_()_XXX", "gender": null, "interested_in": ["friendship", "dating"], "birthday": "2001-07-17 00:00:00", "height": 169, "weight": "69.99", "has_cats": false}, {"ID": [50], "nickname": "XXX_()_XXX", "gender": null, "interested_in": ["friendship", "dating"], "birthday": "2001-07-17 00:00:00", "height": 169, "weight": "69.99", "has_cats": false}]
+#[{"id": [48], "nickname": "XXX_()_XXX", "gender": null, "interested_in": ["friendship", "dating"], "birthday": "2001-07-17 00:00:00", "height": 169, "weight": "69.99", "has_cats": false}, {"id": [50], "nickname": "XXX_()_XXX", "gender": null, "interested_in": ["friendship", "dating"], "birthday": "2001-07-17 00:00:00", "height": 169, "weight": "69.99", "has_cats": false}]
 ```
 
 What does where.fields() do:
@@ -387,15 +384,15 @@ result = get_all(order={'birthday','desc'})
 ```
 In case you do not pass order we have default order criteria specified in our select query as
 ```python
-Table.order('ID', 'desc', order)
+Table.order('id', 'desc', order)
 ```
-Where ID is our field name. One of those keys defined in ```Table.fields``` (Not actual table field name, in case of id, id is table column name and ID is property name of Profile object)
+Where id is our field name. One of those keys defined in ```Table.fields``` (Not actual table field name, in case of id, id is table column name and id is property name of Profile object)
 
 ## Update
 ### Creating update function
 Function will update only provided available fields with update permission and will return updated row on success. It will also execute only single query.
 ```python
-def save(ID, data):
+def save(id, data):
     try:
         print(data)
         update = Table.update(data)
@@ -405,11 +402,11 @@ def save(ID, data):
     try:
         db = get_db()
         cursor = db.cursor()
-        cursor.execute("UPDATE test.user_profile "
+        cursor.execute("UPDATE "+Table+" "
                        "SET "+update.fields()+" "
-                       "WHERE id=%s "
+                       "WHERE "+Table('id')+"=%s "
                        "RETURNING "+Table.select(),
-                       update.values(ID))
+                       update.values(id))
         profile = Table.create(cursor.fetchone())
     except Exception as error:
         raise Error('general_error')
@@ -426,7 +423,7 @@ Take a note that only two fields are specified for update:
 try:
     profile = save(20, {"gender":"female", "weight":45})
     print(profile.__dict__)
-    #{'ID': (20,), 'nickname': 'XXX_()_XXX', 'gender': 'female', 'interested_in': ['friendship', 'dating'], 'birthday': datetime.datetime(2001, 7, 17, 0, 0), 'height': 169, 'weight': '45.0', 'has_cats': False}
+    #{'id': (20,), 'nickname': 'XXX_()_XXX', 'gender': 'female', 'interested_in': ['friendship', 'dating'], 'birthday': datetime.datetime(2001, 7, 17, 0, 0), 'height': 169, 'weight': '45.0', 'has_cats': False}
 except Exception as error:
     # In case nothing updated
     print(error)
