@@ -1,7 +1,8 @@
+import inspect
 import json
+import logging as log
 from functools import wraps
 from dateutil.parser import parse as parse_date
-import logging as log
 
 class color():
     black = lambda x: '\033[30m' + str(x)+'\033[0;39m'
@@ -15,7 +16,7 @@ class color():
 
 class Error(Exception):
     def __init__(self, code, message=None, field=None):
-        super(Error, self).__init__(code)
+        super().__init__(code)
         self.code = code
         if message is not None and not isinstance(message, str):
             self.message = " ".join(map(str, message))
@@ -23,19 +24,38 @@ class Error(Exception):
             self.message = message
         self.field = field
 
-        # import sys
-        # import os
-        # import inspect
-        # import traceback
-        # self.file = inspect.stack()[1][1].rpartition(os.path.sep)[2]
-        # self.line = inspect.stack()[1][2]
-        # print(color.red(self.code+':'), color.yellow(self.message), color.cyan(str(self.file)+':'+str(self.line)), color.green('['+self.field+']') if not self.field is None else '')
-        # traceback.print_exc(file=sys.stdout)
-
         log.exception('%s %s %s',
                       color.red(self.code+':'),
                       color.yellow(self.message),
                       color.green('['+self.field+']') if not self.field is None else '')
+
+class MissingInput(Error):
+    def __init__(self):
+        super().__init__('missing_input')
+
+class MissingField(Error):
+    def __init__(self):
+        super().__init__('missing_field')
+
+class UnknownField(Error):
+    def __init__(self, field=None):
+        super().__init__('unknown_field', field=field)
+
+class InvalidValue(Error):
+    def __init__(self, message=None, field=None):
+        super().__init__('invalid_value', message=message, field=field)
+
+class InvalidDate(InvalidValue):
+    def __init__(self, message=None, field=None):
+        super().__init__('Invalid date', message=message, field=field)
+
+class InvalidInt(InvalidValue):
+    def __init__(self, message=None, field=None):
+        super().__init__('Invalid int', message=message, field=field)
+
+class InvalidFloat(InvalidValue):
+    def __init__(self, message=None, field=None):
+        super().__init__('Invalid float', message=message, field=field)
 
 class Clause:
     def __init__(self, fields, values, pattern='{name}', separator=', ', empty=''):
@@ -62,14 +82,19 @@ FIELD OPTIONS
     fields = {
         'name':{ # name is field and property name by default
             # OPTIONAL PARAMS (optional params can be not specified)
-            'type': 'string'|'int' # default is 'string'
+            'type': 'string'|'int'|'float'|'bool'|'date'|'json' # default is 'string'
                                    # field values ar casted in type
+            'array': True # must be provided array of types
+            'options': ['option1','option2']: option items must be instances of 'type'
             'field': 'table_field_name' # default is 'name'
             'select': True # default is True
+            'insert': True # default is True
             'update': True # default is True
             'encoder': encoder_function # encoder function whith 1 param
                                         # output of encoder function is used directly
                                         # for value
+            'decoder': decoder_function # decoder function is used to decode custom before saving
+            'keys': ['en', 'ka'] is used when type==json
         }
     }
 '''
@@ -90,7 +115,7 @@ class MetaTable(type):
         return str(cls)+str(other)
     def __call__(cls, field):
         if field not in cls.fields:
-            raise Error('unknown_field', 'Unknown field', field)
+            raise UnknownField(field)
         return '"'+cls.name+'"."'+(field if not 'field' in cls.fields[field] else cls.fields[field]['field'])+'"'
 
 class Table(metaclass=MetaTable):
@@ -114,7 +139,7 @@ class Table(metaclass=MetaTable):
         fields, values = cls.parse(data, 'update')
 
         if len(values) == 0:
-            raise Error('missing_input', 'Nothing to update')
+            raise MissingInput()
 
         return Clause(fields, values, '{name}=%s')
 
@@ -124,14 +149,14 @@ class Table(metaclass=MetaTable):
         fields, values = cls.parse(data, 'insert')
 
         if len(values) == 0:
-            raise Error('missing_input', 'Nothing to insert')
+            raise MissingInput()
 
         return Clause(fields, values)
 
     @classmethod
     def where(cls, data, prefix=None):
         if data is None:
-            raise Error('missing_input', 'Where data is missing')
+            raise MissingInput()
 
         values = []
         fields = []
@@ -158,7 +183,7 @@ class Table(metaclass=MetaTable):
 
                 if 'array' in config and config['array']:
                     if not isinstance(value, list) and not isinstance(value, tuple):
-                        raise Error('invalid_value', 'Value of '+field+' must be instance of list '+str(type(value))+' given', field)
+                        raise InvalidValue('Value of '+field+' must be instance of list '+str(type(value))+' given', field)
                     for parse in value:
                         values.append(cls.value(field, parse))
                         fields.append(criteria)
@@ -204,10 +229,10 @@ class Table(metaclass=MetaTable):
                 return ''
         elif field:
             if field not in cls.fields:
-                raise Error('unknown_field', 'Order field unknown')
+                raise UnknownField()
             column = field
         else:
-            raise Error('missing_field', 'Order field not provided')
+            raise MissingField()
 
         column = cls.name+'."'+(cls.fields[column]['field'] if 'field' in cls.fields[column] else column)+'"'
 
@@ -223,7 +248,7 @@ class Table(metaclass=MetaTable):
     @classmethod
     def parse(cls, data, mode):
         if data is None:
-            raise Error('missing_input', mode.capitalize()+' data is missing')
+            raise MissingInput()
 
         values = []
         fields = []
@@ -237,7 +262,7 @@ class Table(metaclass=MetaTable):
 
                 if 'array' in config and config['array']:
                     if not isinstance(value, list) and not isinstance(value, tuple):
-                        raise Error('invalid_value', 'Value of '+field+' must be instance of list '+str(type(value))+' given', field)
+                        raise InvalidValue('Value of '+field+' must be instance of list '+str(type(value))+' given', field)
                     value = '{'+(','.join([cls.value(field, parse) for parse in value]))+'}'
                 else:
                     value = cls.value(field, value)
@@ -272,17 +297,17 @@ class Table(metaclass=MetaTable):
             try:
                 value = parse_date(value)
             except Exception:
-                raise Error('invalid_date', 'Invalid date '+value+' for field'+field, field)
+                raise InvalidDate('Invalid date '+value+' for field'+field, field)
         elif config['type'] == 'float':
             try:
                 value = float(value)
             except Exception:
-                raise Error('invalid_float', 'Invalid float '+value+' for field'+field, field)
+                raise InvalidFloat('Invalid float '+value+' for field'+field, field)
 
         # checking for options
         if 'options' in config:
             if value not in config['options']:
-                raise Error('invalid_value', 'Invalid value '+value+' for field '+field, field)
+                raise InvalidValue('Invalid value '+value+' for field '+field, field)
 
         # encoding
         if 'encoder' in config:
@@ -342,7 +367,20 @@ class Table(metaclass=MetaTable):
         #print(params)
         # if cls.name=='user_media':print(color.magenta(cls.type.__name__))
         # if cls.name=='user_media':print(color.magenta(params))
-        return cls.type(**params)
+
+        init_args = {}
+        for argument in inspect.getargspec(cls.type).args:
+            if argument != 'self':
+                if argument in params:
+                    init_args[argument] = params[argument]
+        result = cls.type(**init_args)
+        for key, value in params.items():
+            if key not in init_args:
+                setattr(result, key, value)
+
+        return result
+
+        #return cls.type(**params)
 
 class Row:
     def __init__(self):
