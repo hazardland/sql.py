@@ -29,6 +29,10 @@ class Error(Exception):
                       color.yellow(self.message),
                       color.green('['+self.field+']') if not self.field is None else '')
 
+class MissingConfig(Error):
+    def __init__(self):
+        super().__init__('missing_config')
+
 class MissingInput(Error):
     def __init__(self):
         super().__init__('missing_input')
@@ -154,7 +158,7 @@ class Table(metaclass=MetaTable):
         return Clause(fields, values)
 
     @classmethod
-    def where(cls, data, prefix=None):
+    def where(cls, data, separator='AND'):
         if data is None:
             raise MissingInput()
 
@@ -162,23 +166,32 @@ class Table(metaclass=MetaTable):
         fields = []
         for field, config in cls.fields.items():
 
-            if (field if prefix is None else prefix+field) in data:
+            if field in data:
 
-                value = data[(field if prefix is None else prefix+field)]
+                value = data[field]
                 column = config['field'] if 'field' in config else field
+                repeat = None
 
                 if not 'type' in config:
                     config['type'] = 'string'
 
                 if 'array' in config and config['array']:
                     criteria = '%s = ANY('+cls.name+'."'+column+'")'
+                elif config['type'] == 'json':
+                    #repeat = '"% '+value+'%"'
+                    #value = '%: "%'+value+'%"%'
+                    value = '%'+value+'%'
+                    #criteria = "("+cls.name+'."'+column+"\"::text LIKE %s OR "+cls.name+'."'+column+"\"::text LIKE %s)"
+                    criteria = cls.name+'."'+column+"\"::text ILIKE %s"
                 elif 'options' in config or config['type'] == 'bool':
                     criteria = cls.name+'."'+column+'"=%s'
                 elif config['type'] == 'int' or config['type'] == 'date' or config['type'] == 'float':
                     criteria = cls.name+'."'+column+'"=%s'
                 else:
-                    value = value+'%'
-                    criteria = cls.name+'."'+column+"\" LIKE %s"
+                    #repeat = '% '+value+'%'
+                    value = '%'+value+'%'
+                    #criteria = "("+cls.name+'."'+column+"\" LIKE %s OR "+cls.name+'."'+column+"\" LIKE %s)"
+                    criteria = cls.name+'."'+column+"\" ILIKE %s"
 
 
                 if 'array' in config and config['array']:
@@ -203,38 +216,55 @@ class Table(metaclass=MetaTable):
                             values.append(cls.value(field, value['to']))
                             fields.append(cls.name+'."'+column+"\"<=%s")
                     else:
-                        values.append(cls.value(field, value))
+                        if config['type'] != 'json':
+                            values.append(cls.value(field, value))
+                            if repeat:
+                                values.append(cls.value(field, repeat))
+                        else:
+                            values.append(str(value))
+                            if repeat:
+                                values.append(str(repeat))
                         fields.append(criteria)
 
-        return Clause(fields, values, separator=' AND ', empty='1=1')
+        return Clause(fields, values, separator=' '+separator+' ', empty='1=1')
 
     @classmethod
-    def order(cls, field, method=None, data=None, prefix=None):
+    def order(cls, field, method=None, data=None):
         if data:
             if not 'field' in data:
                 return ''
-            if prefix:
-                split = data['field'].split(prefix, 1)
-                if len(split) > 0:
-                    if split[1] in cls.fields:
-                        column = split[1]
-                    else:
-                        return ''
-                else:
-                    return ''
 
-            elif data['field'] in cls.fields:
-                column = data['field']
+            split = data['field'].split('.', 1)
+            if len(split) == 2:
+                data['key'] = split[1]
+                data['field'] = split[0]
+            elif len(split) > 2:
+                return ''
+
+            if data['field'] in cls.fields:
+                field = data['field']
             else:
                 return ''
         elif field:
             if field not in cls.fields:
                 raise UnknownField()
-            column = field
         else:
             raise MissingField()
 
-        column = cls.name+'."'+(cls.fields[column]['field'] if 'field' in cls.fields[column] else column)+'"'
+        config = cls.fields[field]
+        if 'type' not in config:
+            config['type'] = 'string'
+
+        column = cls.name+'."'+(config['field'] if 'field' in config else field)+'"'
+
+        if config['type'] == 'json':
+            if 'key' not in data:
+                raise MissingField()
+            if 'keys' not in config:
+                raise MissingConfig()
+            if data['key'] not in config['keys']:
+                raise UnknownField()
+            column += "->'"+data['key']+"'"
 
         if data and 'method' in data:
             method = data['method'].upper()
@@ -404,33 +434,3 @@ class Row:
         return self.__data[self.offsets[name]['position']]
     def __call__(self, name):
         return self.get(name)
-
-class Join():
-    def __init__(self, *tables):
-        self.tables = []
-        self.prefixes = {}
-        for table in tables:
-            if isinstance(table, tuple):
-                self.tables.append(table[0])
-                self.prefixes[table[0].name] = table[1]
-            else:
-                self.tables.append(table)
-                self.prefixes[table.name] = ''
-
-    def where(self, data):
-        fields = []
-        values = []
-        for table in self.tables:
-            where = table.where(data, self.prefixes[table.name])
-            __fields, __values = where.exctract()
-            fields.extend(__fields)
-            values.extend(__values)
-
-        return Clause(fields, values, separator=' AND ', empty='1=1')
-
-    def order(self, field, method=None, data=None):
-        for table in self.tables:
-            order = table.order(field, method, data, prefix=self.prefixes[table.name])
-            if order:
-                return order
-        return ''
