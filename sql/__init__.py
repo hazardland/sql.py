@@ -123,10 +123,12 @@ class MetaTable(type):
         return '"'+cls.name+'"."'+(field if not 'field' in cls.fields[field] else cls.fields[field]['field'])+'"'
 
 class Table(metaclass=MetaTable):
+    type = lambda x: None
     schema = None
     name = None
     fields = dict()
-    type = lambda x: None
+    get_db = lambda: None
+    put_db = lambda db: None
     @classmethod
     def str(cls):
         result = ''
@@ -280,9 +282,12 @@ class Table(metaclass=MetaTable):
         if data is None:
             raise MissingInput()
 
+        log.info(color.cyan('In a parse %s'), cls.fields)
+
         values = []
         fields = []
         for field, config in cls.fields.items():
+            log.info(color.cyan('Parsing field %s'), field)
             if mode in config and not config[mode]:
                 continue
 
@@ -291,9 +296,10 @@ class Table(metaclass=MetaTable):
                 value = data[field]
 
                 if 'array' in config and config['array']:
-                    if not isinstance(value, list) and not isinstance(value, tuple):
-                        raise InvalidValue('Value of '+field+' must be instance of list '+str(type(value))+' given', field)
-                    value = '{'+(','.join([cls.value(field, parse) for parse in value]))+'}'
+                    if value is not None:
+                        if not isinstance(value, list) and not isinstance(value, tuple):
+                            raise InvalidValue('Value of '+field+' must be instance of list '+str(type(value))+' given', field)
+                        value = '{'+(','.join([cls.value(field, parse) for parse in value]))+'}'
                 else:
                     value = cls.value(field, value)
 
@@ -309,6 +315,8 @@ class Table(metaclass=MetaTable):
 
     @classmethod
     def value(cls, field, value):
+        if value is None:
+            return None
 
         config = cls.fields[field]
 
@@ -411,6 +419,154 @@ class Table(metaclass=MetaTable):
         return result
 
         #return cls.type(**params)
+    @classmethod
+    def get(cls, id):
+        try:
+            db = cls.get_db()
+            cursor = db.cursor()
+            cursor.execute(f"""SELECT {cls.select()}
+                             FROM {cls}
+                             WHERE {cls('id')}=%s""",
+                             (id,))
+            return cls.create(cursor.fetchone())
+        except Exception as error:
+            raise error
+        finally:
+            db.commit()
+            cls.put_db(db)
+
+    @classmethod
+    def all(cls, filter=[], order=[], search=[]):
+        filter = cls.where(filter)
+        search = cls.where(search, separator='OR')
+
+        result = []
+
+        try:
+            db = cls.get_db()
+            cursor = db.cursor()
+            cursor.execute(*debug(f"""SELECT
+                           {cls.select()}
+                           FROM {cls}
+                           WHERE ({filter.fields()}) AND ({search.fields()})
+                           ORDER BY {cls.order('id', 'desc', order)}""",
+                           filter.values()+search.values()))
+            log.debug(color.cyan('Total fetched %s'))
+            while True:
+                try:
+                    item = cls.create(cursor.fetchone())
+                    result.append(item)
+                except TypeError:
+                    break
+        except Exception as error:
+            raise error
+        finally:
+            db.commit()
+            cls.put_db(db)
+
+        return result
+
+    @classmethod
+    def filter(cls, page=1, limit=100, filter=[], order=[], search=[]):
+        filter = cls.where(filter)
+        search = cls.where(search, separator='OR')
+        limit = min(limit, 100)
+        offset = (page-1)*limit
+
+        row = Row()
+        row.offset('table', cls.offset())
+        row.offset('total')
+
+        result = Result()
+
+        try:
+            db = cls.get_db()
+            cursor = db.cursor()
+            cursor.execute(*debug(f"""SELECT
+                           {cls.select()},
+                           COUNT(*) OVER()
+                           FROM {cls}
+                           WHERE ({filter.fields()}) AND ({search.fields()})
+                           ORDER BY {cls.order('id', 'desc', order)}
+                           LIMIT %s OFFSET %s""",
+                           filter.values()+search.values()+[limit, offset]))
+            while True:
+                try:
+                    row.data(cursor.fetchone())
+                    if result.total is None:
+                        result.total = row('total')
+                        print('Total', result.total)
+                    item = cls.create(row('table'))
+                    result.add(item)
+                except TypeError:
+                    break
+        except Exception as error:
+            raise error
+        finally:
+            db.commit()
+            cls.put_db(db)
+
+        if result.total is None:
+            result.total = 0
+
+        return result
+
+    @classmethod
+    def save(cls, id, data):
+        update = cls.update(data)
+        try:
+            db = cls.get_db()
+            cursor = db.cursor()
+            cursor.execute(*debug(f"""UPDATE {cls}
+                                    SET {update.fields()}
+                                    WHERE {cls('id')}=%s
+                                    RETURNING {cls.select()}""",
+                                update.values(id)))
+            result = cls.create(cursor.fetchone())
+        except Exception as error:
+            raise error
+        finally:
+            db.commit()
+            cls.put_db(db)
+
+        return result
+
+    @classmethod
+    def add(cls, data):
+        insert = cls.insert(data)
+        try:
+            db = cls.get_db()
+            cursor = db.cursor()
+            cursor.execute(*debug(f"""INSERT INTO {cls}
+                                    SET ({insert.fields()})
+                                    VALUES ({insert.fields('%s')})
+                                    RETURNING {cls.select()}""",
+                                insert.values()))
+            result = cls.create(cursor.fetchone())
+        except Exception as error:
+            raise error
+        finally:
+            db.commit()
+            cls.put_db(db)
+
+        return result
+
+    @classmethod
+    def delete(cls, id):
+        try:
+            db = cls.get_db()
+            cursor = db.cursor()
+            cursor.execute(*debug(f"""DELETE FROM {cls}
+                                    WHERE {cls('id')}=%s""",
+                                (id,)))
+            return bool(cursor.rowcount)
+        except Exception as error:
+            raise error
+        finally:
+            db.commit()
+            cls.put_db(db)
+
+        return False
 
 class Row:
     def __init__(self):
@@ -434,3 +590,50 @@ class Row:
         return self.__data[self.offsets[name]['position']]
     def __call__(self, name):
         return self.get(name)
+
+
+class Result():
+    def __init__(self):
+        self.total = None
+        self.items = []
+    def add(self, item):
+        self.items.append(item)
+
+def debug(query, params):
+    params_debug = tuple([str(param) for param in params])
+
+    query_debug = ''
+    for line in query.splitlines():
+        query_debug += line.strip()+" "
+
+    query_debug = query_debug.replace('SELECT', '\n'+color.cyan('SELECT'))
+    query_debug = query_debug.replace('INSERT', '\n'+color.cyan('INSERT'))
+    query_debug = query_debug.replace('UPDATE', '\n'+color.cyan('UPDATE'))
+    query_debug = query_debug.replace('DELETE', '\n'+color.cyan('DELETE'))
+    query_debug = query_debug.replace('UNION', '\n'+color.blue('UNION'))
+    query_debug = query_debug.replace('LEFT JOIN', '\n'+color.yellow('LEFT JOIN'))
+    query_debug = query_debug.replace('INNER JOIN', '\n'+color.blue('INNER JOIN'))
+    query_debug = query_debug.replace('WHERE', '\n'+color.green('WHERE'))
+    query_debug = query_debug.replace(' AND ', '\n    '+color.yellow('AND')+' ')
+    query_debug = query_debug.replace(' OR ', '\n    '+color.red('OR')+' ')
+    query_debug = query_debug.replace('FROM', '\n'+color.green('FROM'))
+    query_debug = query_debug.replace('ORDER', '\n'+color.red('ORDER'))
+    query_debug = query_debug.replace('LIMIT', '\n'+color.yellow('LIMIT'))
+    query_debug = query_debug.replace('CASE', color.green('CASE'))
+    query_debug = query_debug.replace('THEN', color.blue('THEN'))
+    query_debug = query_debug.replace('ELSE', color.red('ELSE'))
+    query_debug = query_debug.replace('END', color.green('END'))
+    query_debug = query_debug.replace('NULL', color.blue('NULL'))
+    query_debug = query_debug.replace('NOT', color.red('NOT'))
+    query_debug = query_debug.replace('IS', color.red('IS'))
+    query_debug = query_debug.replace('COALESCE', color.green('COALESCE'))
+    query_debug = query_debug.replace('WHEN', color.green('WHEN'))
+    query_debug = query_debug.replace('OVER', color.green('OVER'))
+    query_debug = query_debug.replace('COUNT', color.red('COUNT'))
+    query_debug += '\n'
+
+    if query_debug.count('%s') != len(params_debug):
+        log.error(color.red('Query contains %s params while %s provided'), query_debug.count('%s'), len(params_debug))
+    log.debug(query_debug % params_debug)
+
+    return (query, params)
