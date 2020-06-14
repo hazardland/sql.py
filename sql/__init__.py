@@ -126,7 +126,9 @@ class Table(metaclass=MetaTable):
     type = lambda x: None
     schema = None
     name = None
+    id = 'id'
     fields = dict()
+    joins = dict()
     get_db = lambda: None
     put_db = lambda db: None
     @classmethod
@@ -210,13 +212,20 @@ class Table(metaclass=MetaTable):
                          isinstance(value, tuple) or
                          isinstance(value, dict)) and \
                         ('from' in value or
-                         'to' in value):
+                         'to' in value or
+                         'in' in value):
                         if 'from' in value:
                             values.append(cls.value(field, value['from']))
                             fields.append(cls.name+'."'+column+"\">=%s")
                         if 'to' in value:
                             values.append(cls.value(field, value['to']))
                             fields.append(cls.name+'."'+column+"\"<=%s")
+                        if 'in' in value and (isinstance(value['in'], list) or isinstance(value['in'], tuple)) and len(value['in']):
+                            for item in value['in']:
+                                log.info(color.cyan('%s'), item)
+                                values.append(cls.value(field, item))
+                            fields.append(cls.name+'."'+column+"\" IN ("+','.join(['%s'] * len(value['in']))+")")
+
                     else:
                         if config['type'] != 'json':
                             values.append(cls.value(field, value))
@@ -436,9 +445,14 @@ class Table(metaclass=MetaTable):
             cls.put_db(db)
 
     @classmethod
-    def all(cls, filter=[], order=[], search=[]):
+    def all(cls, filter={}, order={}, search={}):
         filter = cls.where(filter)
         search = cls.where(search, separator='OR')
+
+        row = Row()
+        row.offset(cls.name, cls.offset())
+        join = Join(cls, row)
+        row.offset('total')
 
         result = []
 
@@ -446,15 +460,18 @@ class Table(metaclass=MetaTable):
             db = cls.get_db()
             cursor = db.cursor()
             cursor.execute(*debug(f"""SELECT
-                           {cls.select()}
+                           {','.join((cls.select(), join.select()))}
                            FROM {cls}
+                           {join}
                            WHERE ({filter.fields()}) AND ({search.fields()})
                            ORDER BY {cls.order('id', 'desc', order)}""",
                            filter.values()+search.values()))
             log.debug(color.cyan('Total fetched %s'))
             while True:
                 try:
-                    item = cls.create(cursor.fetchone())
+                    row.data(cursor.fetchone())
+                    item = cls.create(row(cls.name))
+                    join.set(item)
                     result.append(item)
                 except TypeError:
                     break
@@ -467,14 +484,15 @@ class Table(metaclass=MetaTable):
         return result
 
     @classmethod
-    def filter(cls, page=1, limit=100, filter=[], order=[], search=[]):
+    def filter(cls, page=1, limit=100, filter={}, order={}, search={}):
         filter = cls.where(filter)
         search = cls.where(search, separator='OR')
         limit = min(limit, 100)
         offset = (page-1)*limit
 
         row = Row()
-        row.offset('table', cls.offset())
+        row.offset(cls.name, cls.offset())
+        join = Join(cls, row)
         row.offset('total')
 
         result = Result()
@@ -484,8 +502,10 @@ class Table(metaclass=MetaTable):
             cursor = db.cursor()
             cursor.execute(*debug(f"""SELECT
                            {cls.select()},
+                           {join.select()}
                            COUNT(*) OVER()
                            FROM {cls}
+                           {join}
                            WHERE ({filter.fields()}) AND ({search.fields()})
                            ORDER BY {cls.order('id', 'desc', order)}
                            LIMIT %s OFFSET %s""",
@@ -496,7 +516,8 @@ class Table(metaclass=MetaTable):
                     if result.total is None:
                         result.total = row('total')
                         print('Total', result.total)
-                    item = cls.create(row('table'))
+                    item = cls.create(row(cls.name))
+                    join.set(item)
                     result.add(item)
                 except TypeError:
                     break
@@ -512,16 +533,17 @@ class Table(metaclass=MetaTable):
         return result
 
     @classmethod
-    def save(cls, id, data):
+    def save(cls, id, data, filter={}):
+        filter = cls.where(filter)
         update = cls.update(data)
         try:
             db = cls.get_db()
             cursor = db.cursor()
             cursor.execute(*debug(f"""UPDATE {cls}
                                     SET {update.fields()}
-                                    WHERE {cls('id')}=%s
+                                    WHERE {cls('id')}=%s AND {filter.fields()}
                                     RETURNING {cls.select()}""",
-                                update.values(id)))
+                                update.values(id)+filter.values()))
             result = cls.create(cursor.fetchone())
         except Exception as error:
             raise error
@@ -538,7 +560,7 @@ class Table(metaclass=MetaTable):
             db = cls.get_db()
             cursor = db.cursor()
             cursor.execute(*debug(f"""INSERT INTO {cls}
-                                    SET ({insert.fields()})
+                                    ({insert.fields()})
                                     VALUES ({insert.fields('%s')})
                                     RETURNING {cls.select()}""",
                                 insert.values()))
@@ -591,10 +613,38 @@ class Row:
     def __call__(self, name):
         return self.get(name)
 
+class Join():
+    def __init__(self, table, row):
+        self.table = table
+        self.row = row
+        if self.table.joins:
+            for join in self.table.joins.values():
+                self.row.offset(join['table'].name, join['table'])
+    def select(self):
+        result = ''
+        if self.table.joins:
+            result = ','.join([join['table'].select() for join in self.table.joins.values()]) + ','
+        return result
+
+    def clause(self, name):
+        return f"LEFT JOIN {self.table.joins[name]['table']} ON \
+{self.table.joins[name]['table'](self.table.joins[name]['table'].id)}={self.table(self.table.joins[name]['field'])}"
+
+    def __str__(self):
+        if self.table.joins:
+            return '\n'.join([self.clause(join) for join in self.table.joins.keys()])
+        return ''
+
+    def set(self, item):
+        if self.table.joins:
+            for name, join in self.table.joins.items():
+                setattr(item, name, join['table'].create(self.row(join['table'].name)))
+
+
 
 class Result():
-    def __init__(self):
-        self.total = None
+    def __init__(self, total=None):
+        self.total = total
         self.items = []
     def add(self, item):
         self.items.append(item)
@@ -616,6 +666,7 @@ def debug(query, params):
     query_debug = query_debug.replace('WHERE', '\n'+color.green('WHERE'))
     query_debug = query_debug.replace(' AND ', '\n    '+color.yellow('AND')+' ')
     query_debug = query_debug.replace(' OR ', '\n    '+color.red('OR')+' ')
+    query_debug = query_debug.replace(' ON ', ' '+color.cyan('ON')+' ')
     query_debug = query_debug.replace('FROM', '\n'+color.green('FROM'))
     query_debug = query_debug.replace('ORDER', '\n'+color.red('ORDER'))
     query_debug = query_debug.replace('LIMIT', '\n'+color.yellow('LIMIT'))
