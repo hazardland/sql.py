@@ -430,14 +430,21 @@ class Table(metaclass=MetaTable):
         #return cls.type(**params)
     @classmethod
     def get(cls, id):
+        row = Row()
+        row.offset(cls.name, cls)
+        join = Join(cls, row)
         try:
             db = cls.get_db()
             cursor = db.cursor()
-            cursor.execute(f"""SELECT {cls.select()}
+            cursor.execute(f"""SELECT {select(cls.select(), join.select())}
                              FROM {cls}
+                             {join}
                              WHERE {cls('id')}=%s""",
                              (id,))
-            return cls.create(cursor.fetchone())
+            row.data(cursor.fetchone())
+            result = cls.create(row(cls.name))
+            join.set(result)
+            return result
         except Exception as error:
             raise error
         finally:
@@ -450,7 +457,7 @@ class Table(metaclass=MetaTable):
         search = cls.where(search, separator='OR')
 
         row = Row()
-        row.offset(cls.name, cls.offset())
+        row.offset(cls.name, cls)
         join = Join(cls, row)
         row.offset('total')
 
@@ -460,7 +467,7 @@ class Table(metaclass=MetaTable):
             db = cls.get_db()
             cursor = db.cursor()
             cursor.execute(*debug(f"""SELECT
-                           {','.join((cls.select(), join.select()))}
+                           {select(cls.select(), join.select())}
                            FROM {cls}
                            {join}
                            WHERE ({filter.fields()}) AND ({search.fields()})
@@ -491,7 +498,7 @@ class Table(metaclass=MetaTable):
         offset = (page-1)*limit
 
         row = Row()
-        row.offset(cls.name, cls.offset())
+        row.offset(cls.name, cls)
         join = Join(cls, row)
         row.offset('total')
 
@@ -501,8 +508,7 @@ class Table(metaclass=MetaTable):
             db = cls.get_db()
             cursor = db.cursor()
             cursor.execute(*debug(f"""SELECT
-                           {cls.select()},
-                           {join.select()}
+                           {select(cls.select(), join.select())},
                            COUNT(*) OVER()
                            FROM {cls}
                            {join}
@@ -536,15 +542,26 @@ class Table(metaclass=MetaTable):
     def save(cls, id, data, filter={}):
         filter = cls.where(filter)
         update = cls.update(data)
+        row = Row()
+        row.offset(cls.name, cls)
+        join = Join(cls, row)
         try:
             db = cls.get_db()
             cursor = db.cursor()
-            cursor.execute(*debug(f"""UPDATE {cls}
-                                    SET {update.fields()}
-                                    WHERE {cls('id')}=%s AND {filter.fields()}
-                                    RETURNING {cls.select()}""",
+            cursor.execute(*debug(f"""WITH {cls.name} AS (
+                                        UPDATE {cls}
+                                        SET {update.fields()}
+                                        WHERE {cls('id')}=%s AND {filter.fields()}
+                                        RETURNING {cls.select()}
+                                    )
+                                    SELECT {select(f'{cls.name}.*', join.select())}
+                                    FROM {cls.name}
+                                    {join}
+                                    """,
                                 update.values(id)+filter.values()))
-            result = cls.create(cursor.fetchone())
+            row.data(cursor.fetchone())
+            result = cls.create(row(cls.name))
+            join.set(result)
         except Exception as error:
             raise error
         finally:
@@ -555,16 +572,28 @@ class Table(metaclass=MetaTable):
 
     @classmethod
     def add(cls, data):
+        row = Row()
+        row.offset(cls.name, cls)
+        join = Join(cls, row)
         insert = cls.insert(data)
         try:
             db = cls.get_db()
             cursor = db.cursor()
-            cursor.execute(*debug(f"""INSERT INTO {cls}
-                                    ({insert.fields()})
-                                    VALUES ({insert.fields('%s')})
-                                    RETURNING {cls.select()}""",
+            cursor.execute(*debug(f"""WITH {cls.name} AS (
+                                        INSERT INTO {cls}
+                                        ({insert.fields()})
+                                        VALUES ({insert.fields('%s')})
+                                        RETURNING {cls.select()}
+                                    )
+                                    SELECT {select(f'{cls.name}.*', join.select())}
+                                    FROM {cls.name}
+                                    {join}
+                                    """,
                                 insert.values()))
-            result = cls.create(cursor.fetchone())
+
+            row.data(cursor.fetchone())
+            result = cls.create(row(cls.name))
+            join.set(result)
         except Exception as error:
             raise error
         finally:
@@ -623,7 +652,7 @@ class Join():
     def select(self):
         result = ''
         if self.table.joins:
-            result = ','.join([join['table'].select() for join in self.table.joins.values()]) + ','
+            result = ','.join([join['table'].select() for join in self.table.joins.values()])
         return result
 
     def clause(self, name):
@@ -640,7 +669,8 @@ class Join():
             for name, join in self.table.joins.items():
                 setattr(item, name, join['table'].create(self.row(join['table'].name)))
 
-
+def select(*args):
+    return ','.join([item for item in args if str(item).strip()!=''])
 
 class Result():
     def __init__(self, total=None):
@@ -667,6 +697,7 @@ def debug(query, params):
     query_debug = query_debug.replace(' AND ', '\n    '+color.yellow('AND')+' ')
     query_debug = query_debug.replace(' OR ', '\n    '+color.red('OR')+' ')
     query_debug = query_debug.replace(' ON ', ' '+color.cyan('ON')+' ')
+    query_debug = query_debug.replace('WITH ', color.cyan('WITH')+' ')
     query_debug = query_debug.replace('FROM', '\n'+color.green('FROM'))
     query_debug = query_debug.replace('ORDER', '\n'+color.red('ORDER'))
     query_debug = query_debug.replace('LIMIT', '\n'+color.yellow('LIMIT'))
