@@ -51,15 +51,15 @@ class InvalidValue(Error):
 
 class InvalidDate(InvalidValue):
     def __init__(self, message=None, field=None):
-        super().__init__('Invalid date', message=message, field=field)
+        super().__init__(message=message, field=field)
 
 class InvalidInt(InvalidValue):
     def __init__(self, message=None, field=None):
-        super().__init__('Invalid int', message=message, field=field)
+        super().__init__(message=message, field=field)
 
 class InvalidFloat(InvalidValue):
     def __init__(self, message=None, field=None):
-        super().__init__('Invalid float', message=message, field=field)
+        super().__init__(message=message, field=field)
 
 class Clause:
     def __init__(self, fields, values, pattern='{name}', separator=', ', empty=''):
@@ -129,6 +129,7 @@ class Table(metaclass=MetaTable):
     id = 'id'
     fields = dict()
     joins = dict()
+    #order = {'field':'id', 'method':'desc'}
     get_db = lambda: None
     put_db = lambda db: None
     @classmethod
@@ -240,27 +241,29 @@ class Table(metaclass=MetaTable):
         return Clause(fields, values, separator=' '+separator+' ', empty='1=1')
 
     @classmethod
-    def order(cls, field, method=None, data=None):
-        if data:
-            if not 'field' in data:
-                return ''
+    def order(cls, field=None, method=None, data={}):
+        if 'field' in data:
+            field = data['field']
+        if 'method' in data:
+            method = data['method']
 
-            split = data['field'].split('.', 1)
-            if len(split) == 2:
-                data['key'] = split[1]
-                data['field'] = split[0]
-            elif len(split) > 2:
-                return ''
+        key = None
 
-            if data['field'] in cls.fields:
-                field = data['field']
-            else:
-                return ''
-        elif field:
-            if field not in cls.fields:
-                raise UnknownField()
-        else:
+        if not field:
             raise MissingField()
+
+        split = field.split('.', 1)
+        if len(split) == 2:
+            key = split[1]
+            field = split[0]
+        elif len(split) > 2:
+            return ''
+
+        if not field:
+            raise MissingField()
+
+        if field not in cls.fields:
+            raise UnknownField(field)
 
         config = cls.fields[field]
         if 'type' not in config:
@@ -269,22 +272,26 @@ class Table(metaclass=MetaTable):
         column = cls.name+'."'+(config['field'] if 'field' in config else field)+'"'
 
         if config['type'] == 'json':
-            if 'key' not in data:
+            if 'key' is None:
                 raise MissingField()
             if 'keys' not in config:
                 raise MissingConfig()
-            if data['key'] not in config['keys']:
+            if key not in config['keys']:
                 raise UnknownField()
-            column += "->'"+data['key']+"'"
+            column += "->'"+key+"'"
 
-        if data and 'method' in data:
-            method = data['method'].upper()
-            if method not in ['ASC', 'DESC']:
-                method = 'ASC'
-        else:
-            method = 'ASC'
+        if method is None:
+            method = ''
 
-        return column+' '+method
+        method = method.upper()
+
+        if method and method not in ['ASC', 'DESC']:
+            raise InvalidValue(method)
+
+        if method:
+            method = ' '+method
+
+        return column+method
 
     @classmethod
     def parse(cls, data, mode):
@@ -473,7 +480,7 @@ class Table(metaclass=MetaTable):
                            WHERE ({filter.fields()}) AND ({search.fields()})
                            ORDER BY {cls.order('id', 'desc', order)}""",
                            filter.values()+search.values()))
-            log.debug(color.cyan('Total fetched %s'))
+            log.debug(color.cyan('Total fetched %s'), cursor.rowcount)
             while True:
                 try:
                     row.data(cursor.fetchone())
@@ -513,7 +520,7 @@ class Table(metaclass=MetaTable):
                            FROM {cls}
                            {join}
                            WHERE ({filter.fields()}) AND ({search.fields()})
-                           ORDER BY {cls.order('id', 'desc', order)}
+                           ORDER BY {join.order('id', 'desc', order)}
                            LIMIT %s OFFSET %s""",
                            filter.values()+search.values()+[limit, offset]))
             while True:
@@ -668,6 +675,25 @@ class Join():
         if self.table.joins:
             for name, join in self.table.joins.items():
                 setattr(item, name, join['table'].create(self.row(join['table'].name)))
+
+    def order(self, field, method, order={}):
+        if 'field' in order:
+            field = order['field']
+        if 'method' in order:
+            method = order['method']
+
+        order = None
+        if self.table.joins:
+            for name, join in self.table.joins.items():
+                if field.startswith(name+'.'):
+                    try:
+                        order = join['table'].order(data={'field':field[len(name)+1:], 'method':method})
+                    except Exception:
+                        pass
+        if not order:
+            return self.table.order(field, method)
+        return order
+
 
 def select(*args):
     return ','.join([item for item in args if str(item).strip()!=''])
