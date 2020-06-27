@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name='pgsql-table',
-      description='JSON definition based light ORM for PosgreSQL',
+      description='light PosgreSQL ORM with JSON model config',
       long_description=open("README.md").read(),
       long_description_content_type="text/markdown",
       author='Vakhtang Zardiashvili',

@@ -456,7 +456,7 @@ class Table(metaclass=MetaTable):
             cls.put_db(db)
 
     @classmethod
-    def all(cls, filter={}, order={}, search={}):
+    def all(cls, filter={}, order={}, search={}, limit=None):
         join = Join(cls, filter, search)
 
         result = []
@@ -469,7 +469,8 @@ class Table(metaclass=MetaTable):
                            FROM {cls}
                            {join}
                            WHERE {join.fields()}
-                           ORDER BY {cls.order('id', 'desc', order)}""",
+                           ORDER BY {cls.order('id', 'desc', order)}
+                           {f'LIMIT {int(limit)}' if limit else ''}""",
                            join.values()))
             log.debug(color.cyan('Total fetched %s'), cursor.rowcount)
             while True:
