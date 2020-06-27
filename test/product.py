@@ -43,3 +43,22 @@ def filter(page=1, limit=100, filter={}, order={}, search={}):
                         filter=filter,
                         order=order,
                         search=search)
+
+product.all(filter={
+        'price':{
+            'from': 5,
+            'to': 1
+        },
+        'category_id': 1
+    },
+    search={
+        'name': 'plumbus',
+        'category':{
+            'name': 'plumbus'
+        }
+    },
+    order={
+        'field': 'price',
+        'method': 'desc'
+    }
+)

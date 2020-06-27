@@ -80,14 +80,19 @@ LEFT JOIN "site"."category" ON "category"."id"="product"."category_id"
 ```python
 import sys
 import os
+
 import psycopg2
 from psycopg2 import pool
+
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
 import logging as log
 log.basicConfig(level=log.DEBUG)
 
+# Ignore this part
+if sys.platform.lower() == "win32":
+    os.system('color')
 class color():
     black = lambda x: '\033[30m' + str(x)+'\033[0;39m'
     red = lambda x: '\033[31m' + str(x)+'\033[0;39m'
@@ -121,9 +126,46 @@ def init_db():
         log.error(e)
         sys.exit(0)
 
+# Attach db functions to orm
 import sql
 sql.Table.get_db = get_db
 sql.Table.put_db = put_db
 ```
 
 Last 3 lines renders ORM ready to use. **init_db** creates 20 connection pool to PosgreSQL. It uses .env file to get database connection string from environment variable **DB**. .env file contains ```DB="dbname=gs1 user=postgres password=1234 host=127.0.0.1 port=5432"```
+
+```python
+product.all(filter={
+        'price':{
+            'from': 5,
+            'to': 1
+        },
+        'category_id': 1
+    },
+    search={
+        'name': 'plumbus',
+        'category':{
+            'name': 'plumbus'
+        }
+    },
+    order={
+        'field': 'price',
+        'method': 'desc'
+    }
+)
+```
+
+The following query will be generated and executed:
+```sql
+SELECT
+    product.id, product.name, product.price, product.category_id,
+    category.id, category.name
+FROM "site"."product"
+LEFT JOIN "site"."category" ON "category"."id"="product"."category_id"
+WHERE (product."name" ILIKE %plumbus%
+    OR category."name" ILIKE %plumbus%)
+    AND (product."price">=5.0
+    AND product."price"<=1.0
+    AND product."category_id"=1)
+ORDER BY product."price" DESC
+```
