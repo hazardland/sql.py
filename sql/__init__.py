@@ -298,12 +298,12 @@ class Table(metaclass=MetaTable):
         if data is None:
             raise MissingInput()
 
-        log.info(color.cyan('In a parse %s'), cls.fields)
+        #log.info(color.cyan('In a parse %s'), cls.fields)
 
         values = []
         fields = []
         for field, config in cls.fields.items():
-            log.info(color.cyan('Parsing field %s'), field)
+            #log.info(color.cyan('Parsing field %s'), field)
             if mode in config and not config[mode]:
                 continue
 
@@ -437,20 +437,17 @@ class Table(metaclass=MetaTable):
         #return cls.type(**params)
     @classmethod
     def get(cls, id):
-        row = Row()
-        row.offset(cls.name, cls)
-        join = Join(cls, row)
+        join = Join(cls)
         try:
             db = cls.get_db()
             cursor = db.cursor()
-            cursor.execute(f"""SELECT {select(cls.select(), join.select())}
+            cursor.execute(f"""SELECT {join.select()}
                              FROM {cls}
                              {join}
                              WHERE {cls('id')}=%s""",
                              (id,))
-            row.data(cursor.fetchone())
-            result = cls.create(row(cls.name))
-            join.set(result)
+            join.row.data(cursor.fetchone())
+            result = join.create()
             return result
         except Exception as error:
             raise error
@@ -460,13 +457,7 @@ class Table(metaclass=MetaTable):
 
     @classmethod
     def all(cls, filter={}, order={}, search={}):
-        filter = cls.where(filter)
-        search = cls.where(search, separator='OR')
-
-        row = Row()
-        row.offset(cls.name, cls)
-        join = Join(cls, row)
-        row.offset('total')
+        join = Join(cls, filter, search)
 
         result = []
 
@@ -474,18 +465,17 @@ class Table(metaclass=MetaTable):
             db = cls.get_db()
             cursor = db.cursor()
             cursor.execute(*debug(f"""SELECT
-                           {select(cls.select(), join.select())}
+                           {join.select()}
                            FROM {cls}
                            {join}
-                           WHERE ({filter.fields()}) AND ({search.fields()})
+                           WHERE {join.fields()}
                            ORDER BY {cls.order('id', 'desc', order)}""",
-                           filter.values()+search.values()))
+                           join.values()))
             log.debug(color.cyan('Total fetched %s'), cursor.rowcount)
             while True:
                 try:
-                    row.data(cursor.fetchone())
-                    item = cls.create(row(cls.name))
-                    join.set(item)
+                    join.row.data(cursor.fetchone())
+                    item = join.create()
                     result.append(item)
                 except TypeError:
                     break
@@ -499,38 +489,35 @@ class Table(metaclass=MetaTable):
 
     @classmethod
     def filter(cls, page=1, limit=100, filter={}, order={}, search={}):
-        filter = cls.where(filter)
-        search = cls.where(search, separator='OR')
+        join = Join(cls, filter, search)
+        join.row.offset('total')
+
         limit = min(limit, 100)
         offset = (page-1)*limit
 
-        row = Row()
-        row.offset(cls.name, cls)
-        join = Join(cls, row)
-        row.offset('total')
-
         result = Result()
+
+        db = None
 
         try:
             db = cls.get_db()
             cursor = db.cursor()
             cursor.execute(*debug(f"""SELECT
-                           {select(cls.select(), join.select())},
+                           {join.select()},
                            COUNT(*) OVER()
                            FROM {cls}
                            {join}
-                           WHERE ({filter.fields()}) AND ({search.fields()})
+                           WHERE {join.fields()}
                            ORDER BY {join.order('id', 'desc', order)}
                            LIMIT %s OFFSET %s""",
-                           filter.values()+search.values()+[limit, offset]))
+                           join.values()+[limit, offset]))
+            log.debug(color.cyan('Total fetched %s'), cursor.rowcount)
             while True:
                 try:
-                    row.data(cursor.fetchone())
+                    join.row.data(cursor.fetchone())
                     if result.total is None:
-                        result.total = row('total')
-                        print('Total', result.total)
-                    item = cls.create(row(cls.name))
-                    join.set(item)
+                        result.total = join.row('total')
+                    item = join.create()
                     result.add(item)
                 except TypeError:
                     break
@@ -548,27 +535,24 @@ class Table(metaclass=MetaTable):
     @classmethod
     def save(cls, id, data, filter={}):
         filter = cls.where(filter)
+        join = Join(cls)
         update = cls.update(data)
-        row = Row()
-        row.offset(cls.name, cls)
-        join = Join(cls, row)
         try:
             db = cls.get_db()
             cursor = db.cursor()
-            cursor.execute(*debug(f"""WITH {cls.name} AS (
+            cursor.execute(*debug(f"""WITH "{cls.name}" AS (
                                         UPDATE {cls}
                                         SET {update.fields()}
                                         WHERE {cls('id')}=%s AND {filter.fields()}
                                         RETURNING {cls.select()}
                                     )
-                                    SELECT {select(f'{cls.name}.*', join.select())}
-                                    FROM {cls.name}
+                                    SELECT {join.select()}
+                                    FROM "{cls.name}"
                                     {join}
                                     """,
                                 update.values(id)+filter.values()))
-            row.data(cursor.fetchone())
-            result = cls.create(row(cls.name))
-            join.set(result)
+            join.row.data(cursor.fetchone())
+            result = join.create()
         except Exception as error:
             raise error
         finally:
@@ -579,28 +563,25 @@ class Table(metaclass=MetaTable):
 
     @classmethod
     def add(cls, data):
-        row = Row()
-        row.offset(cls.name, cls)
-        join = Join(cls, row)
+        join = Join(cls)
         insert = cls.insert(data)
         try:
             db = cls.get_db()
             cursor = db.cursor()
-            cursor.execute(*debug(f"""WITH {cls.name} AS (
+            cursor.execute(*debug(f"""WITH "{cls.name}" AS (
                                         INSERT INTO {cls}
                                         ({insert.fields()})
                                         VALUES ({insert.fields('%s')})
                                         RETURNING {cls.select()}
                                     )
-                                    SELECT {select(f'{cls.name}.*', join.select())}
-                                    FROM {cls.name}
+                                    SELECT {join.select()}
+                                    FROM "{cls.name}"
                                     {join}
                                     """,
                                 insert.values()))
 
-            row.data(cursor.fetchone())
-            result = cls.create(row(cls.name))
-            join.set(result)
+            join.row.data(cursor.fetchone())
+            result = join.create()
         except Exception as error:
             raise error
         finally:
@@ -650,16 +631,50 @@ class Row:
         return self.get(name)
 
 class Join():
-    def __init__(self, table, row):
+    def __init__(self, table, filter={}, search={}):
         self.table = table
-        self.row = row
+
+        self.row = Row()
+        self.row.offset(self.table.name, self.table)
         if self.table.joins:
             for join in self.table.joins.values():
                 self.row.offset(join['table'].name, join['table'])
+
+        self.searchs = {}
+        self.filters = {}
+        if filter and self.table.joins:
+            self.filters[self.table.name] = self.table.where(filter)
+            for key, value in self.table.joins.items():
+                if key in filter:
+                    self.filters[key] = value['table'].where(filter[key])
+
+        if search and self.table.joins:
+            self.searchs[self.table.name] = self.table.where(search, separator='OR')
+            for key, value in self.table.joins.items():
+                if key in search:
+                    self.searchs[key] = value['table'].where(search[key], separator='OR')
+
     def select(self):
         result = ''
         if self.table.joins:
             result = ','.join([join['table'].select() for join in self.table.joins.values()])
+        return select(self.table.select(), result)
+
+    def fields(self):
+        search = ' OR '.join(where.fields() for where in self.searchs.values())
+        filter = ' AND '.join(where.fields() for where in self.filters.values())
+        if not search:
+            search = '1=1'
+        if not filter:
+            filter = '1=1'
+        return '('+search+ ') AND ('+filter+')'
+
+    def values(self):
+        result = []
+        for where in self.searchs.values():
+            result.extend(where.values())
+        for where in self.filters.values():
+            result.extend(where.values())
         return result
 
     def clause(self, name):
@@ -671,10 +686,12 @@ class Join():
             return '\n'.join([self.clause(join) for join in self.table.joins.keys()])
         return ''
 
-    def set(self, item):
+    def create(self):
+        item = self.table.create(self.row(self.table.name))
         if self.table.joins:
             for name, join in self.table.joins.items():
                 setattr(item, name, join['table'].create(self.row(join['table'].name)))
+        return item
 
     def order(self, field, method, order={}):
         if 'field' in order:
@@ -694,15 +711,15 @@ class Join():
             return self.table.order(field, method)
         return order
 
-
 def select(*args):
-    return ','.join([item for item in args if str(item).strip()!=''])
+    return ','.join([item for item in args if str(item).strip() != ''])
 
 class Result():
     def __init__(self, total=None):
         self.total = total
         self.items = []
     def add(self, item):
+        #log.info('Adding %s', item)
         self.items.append(item)
 
 def debug(query, params):
@@ -742,6 +759,9 @@ def debug(query, params):
 
     if query_debug.count('%s') != len(params_debug):
         log.error(color.red('Query contains %s params while %s provided'), query_debug.count('%s'), len(params_debug))
-    log.debug(query_debug % params_debug)
+        log.debug(query_debug)
+        log.debug(params_debug)
+    else:
+        log.debug(query_debug % params_debug)
 
     return (query, params)
