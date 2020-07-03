@@ -3,6 +3,7 @@ import json
 import logging as log
 from functools import wraps
 from dateutil.parser import parse as parse_date
+import re
 
 class color():
     black = lambda x: '\033[30m' + str(x)+'\033[0;39m'
@@ -44,6 +45,11 @@ class MissingField(Error):
 class UnknownField(Error):
     def __init__(self, field=None):
         super().__init__('unknown_field', field=field)
+
+class UniqueError(Error):
+    def __init__(self, field=None):
+        print(color.red(field))
+        super().__init__('unique_error', field=field)
 
 class InvalidValue(Error):
     def __init__(self, message=None, field=None):
@@ -164,12 +170,16 @@ class Table(metaclass=MetaTable):
 
     @classmethod
     def where(cls, data, separator='AND'):
+        log.info(color.cyan('Where data %s'), data)
+
         if data is None:
             raise MissingInput()
 
         values = []
         fields = []
         for field, config in cls.fields.items():
+
+            log.info(color.cyan('Parsing field %s %s'), field, config)
 
             if field in data:
 
@@ -198,7 +208,6 @@ class Table(metaclass=MetaTable):
                     #criteria = "("+cls.name+'."'+column+"\" LIKE %s OR "+cls.name+'."'+column+"\" LIKE %s)"
                     criteria = cls.name+'."'+column+"\" ILIKE %s"
 
-
                 if 'array' in config and config['array']:
                     if not isinstance(value, list) and not isinstance(value, tuple):
                         raise InvalidValue('Value of '+field+' must be instance of list '+str(type(value))+' given', field)
@@ -206,27 +215,32 @@ class Table(metaclass=MetaTable):
                         values.append(cls.value(field, parse))
                         fields.append(criteria)
                 else:
-                    if (config['type'] == 'int' or
+                    if 'options' in config and (isinstance(value, list) or isinstance(value, tuple) or isinstance(value, set)):
+                        fields.append(cls.name+'."'+column+"\" IN ("+','.join(['%s'] * len(value))+")")
+                        for item in value:
+                            log.info(color.cyan('%s'), item)
+                            values.append(cls.value(field, item))
+                    elif (config['type'] == 'int' or
                         config['type'] == 'date' or
                         config['type'] == 'float') and \
                         (isinstance(value, list) or
                          isinstance(value, tuple) or
-                         isinstance(value, dict)) and \
-                        ('from' in value or
-                         'to' in value or
-                         'in' in value):
-                        if 'from' in value:
+                         isinstance(value, set) or
+                         isinstance(value, dict)):
+                        # ('from' in value or
+                        #  'to' in value or
+                        #  'in' in value):
+                        if isinstance(value, dict) and 'from' in value:
                             values.append(cls.value(field, value['from']))
                             fields.append(cls.name+'."'+column+"\">=%s")
-                        if 'to' in value:
+                        if isinstance(value, dict) and 'to' in value:
                             values.append(cls.value(field, value['to']))
                             fields.append(cls.name+'."'+column+"\"<=%s")
-                        if 'in' in value and (isinstance(value['in'], list) or isinstance(value['in'], tuple)) and len(value['in']):
-                            for item in value['in']:
+                        if (isinstance(value, list) or isinstance(value, tuple) or isinstance(value, set)) and len(value):
+                            for item in value:
                                 log.info(color.cyan('%s'), item)
                                 values.append(cls.value(field, item))
-                            fields.append(cls.name+'."'+column+"\" IN ("+','.join(['%s'] * len(value['in']))+")")
-
+                            fields.append(cls.name+'."'+column+"\" IN ("+','.join(['%s'] * len(value))+")")
                     else:
                         if config['type'] != 'json':
                             values.append(cls.value(field, value))
@@ -580,10 +594,19 @@ class Table(metaclass=MetaTable):
                                     {join}
                                     """,
                                 insert.values()))
-
             join.row.data(cursor.fetchone())
             result = join.create()
+
         except Exception as error:
+            match = re.search(r''+cls.name+'_unique_(.*?)_index', str(error))
+            print(match)
+            if match is not None and match.lastindex > 0:
+                index = match.group(1)
+                if index in cls.fields:
+                    raise UniqueError(index)
+                for field, config in cls.fields:
+                    if 'field' in config and config['field'] == index:
+                        raise UniqueError(field)
             raise error
         finally:
             db.commit()
@@ -592,13 +615,14 @@ class Table(metaclass=MetaTable):
         return result
 
     @classmethod
-    def delete(cls, id):
+    def delete(cls, id, filter={}):
+        filter = cls.where(filter)
         try:
             db = cls.get_db()
             cursor = db.cursor()
             cursor.execute(*debug(f"""DELETE FROM {cls}
-                                    WHERE {cls('id')}=%s""",
-                                (id,)))
+                                    WHERE {cls('id')}=%s AND {filter.fields()}""",
+                                (id,)+filter.values()))
             return bool(cursor.rowcount)
         except Exception as error:
             raise error
@@ -643,17 +667,19 @@ class Join():
 
         self.searchs = {}
         self.filters = {}
-        if filter and self.table.joins:
+        if filter:
             self.filters[self.table.name] = self.table.where(filter)
-            for key, value in self.table.joins.items():
-                if key in filter:
-                    self.filters[key] = value['table'].where(filter[key])
+            if self.table.joins:
+                for key, value in self.table.joins.items():
+                    if key in filter:
+                        self.filters[key] = value['table'].where(filter[key])
 
-        if search and self.table.joins:
+        if search:
             self.searchs[self.table.name] = self.table.where(search, separator='OR')
-            for key, value in self.table.joins.items():
-                if key in search:
-                    self.searchs[key] = value['table'].where(search[key], separator='OR')
+            if self.table.joins:
+                for key, value in self.table.joins.items():
+                    if key in search:
+                        self.searchs[key] = value['table'].where(search[key], separator='OR')
 
     def select(self):
         result = ''
