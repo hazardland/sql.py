@@ -5,6 +5,8 @@ from functools import wraps
 from dateutil.parser import parse as parse_date
 import re
 
+ESCAPE = '"'
+
 class color():
     black = lambda x: '\033[30m' + str(x)+'\033[0;39m'
     red = lambda x: '\033[31m' + str(x)+'\033[0;39m'
@@ -126,7 +128,7 @@ class MetaTable(type):
     def __call__(cls, field):
         if field not in cls.fields:
             raise UnknownField(field)
-        return '"'+cls.name+'"."'+(field if not 'field' in cls.fields[field] else cls.fields[field]['field'])+'"'
+        return ESCAPE+cls.name+ESCAPE+'.'+ESCAPE+(field if not 'field' in cls.fields[field] else cls.fields[field]['field'])+ESCAPE
 
 class Table(metaclass=MetaTable):
     type = lambda x: None
@@ -142,8 +144,8 @@ class Table(metaclass=MetaTable):
     def str(cls):
         result = ''
         if cls.schema:
-            result += '"'+cls.schema+'".'
-        return result + '"'+cls.name+'"'
+            result += ESCAPE+cls.schema+ESCAPE+'.'
+        return result + ESCAPE+cls.name+ESCAPE
     """
         Returns an array for updating table
         update['fields'] = 'field1=%s, field2=%s'
@@ -191,21 +193,16 @@ class Table(metaclass=MetaTable):
                     config['type'] = 'string'
 
                 if 'array' in config and config['array']:
-                    criteria = '%s = ANY('+cls.name+'."'+column+'")'
+                    criteria = '%s = ANY('+cls.name+'.'+ESCAPE+column+ESCAPE+')'
                 elif config['type'] == 'json':
-                    #repeat = '"% '+value+'%"'
-                    #value = '%: "%'+value+'%"%'
                     value = '%'+value+'%'
-                    #criteria = "("+cls.name+'."'+column+"\"::text LIKE %s OR "+cls.name+'."'+column+"\"::text LIKE %s)"
-                    criteria = cls.name+'."'+column+"\"::text ILIKE %s"
+                    criteria = cls.name+'.'+ESCAPE+column+ESCAPE+'::text ILIKE %s'
                 elif 'options' in config or config['type'] == 'bool':
-                    criteria = cls.name+'."'+column+'"=%s'
+                    criteria = cls.name+'.'+ESCAPE+column+ESCAPE+'=%s'
                 elif config['type'] == 'int' or config['type'] == 'date' or config['type'] == 'float':
-                    criteria = cls.name+'."'+column+'"=%s'
+                    criteria = cls.name+'.'+ESCAPE+column+ESCAPE+'=%s'
                 else:
-                    #repeat = '% '+value+'%'
                     value = '%'+value+'%'
-                    #criteria = "("+cls.name+'."'+column+"\" LIKE %s OR "+cls.name+'."'+column+"\" LIKE %s)"
                     criteria = cls.name+'."'+column+"\" ILIKE %s"
 
                 if 'array' in config and config['array']:
@@ -283,7 +280,7 @@ class Table(metaclass=MetaTable):
         if 'type' not in config:
             config['type'] = 'string'
 
-        column = cls.name+'."'+(config['field'] if 'field' in config else field)+'"'
+        column = cls.name+'.'+ESCAPE+(config['field'] if 'field' in config else field)+ESCAPE
 
         if config['type'] == 'json':
             if 'key' is None:
