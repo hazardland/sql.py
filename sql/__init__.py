@@ -428,6 +428,8 @@ class Table(metaclass=MetaTable):
                     params[field] = config['decoder'](data[position])
                 else:
                     params[field] = data[position]
+                    if 'type' in config and config['type'] == 'json' and isinstance(params[field], str):
+                        params[field] = json.loads(params[field])
             position += 1
         #print(params)
         # if cls.name=='user_media':print(color.magenta(cls.type.__name__))
