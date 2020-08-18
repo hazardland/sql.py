@@ -1,8 +1,20 @@
-**pgsql-table** is an PostgreSQL ORM which aims to simplify JSON based API implementation process. It allows direct usage of request JSON data securely for inserting updating and selecting. Following example shows how to setup simple Product model module:
+**pgsql-table** is an PostgreSQL ORM which aims to simplify JSON based API implementation process. It allows direct usage of request JSON data securely for inserting updating and selecting.
+
+<!-- MarkdownTOC autolink=true -->
+
+- [Introduction](#introduction)
+- [Setup](#setup)
+- [Filter](#filter)
+- [All](#all)
+
+<!-- /MarkdownTOC -->
+
 
 # Introduction
+Following example shows how to setup simple Product model module:
 
 **product.py**
+
 ```python
 import sql
 import category
