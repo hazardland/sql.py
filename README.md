@@ -1,6 +1,6 @@
 **pgsql-table** is an PostgreSQL ORM which aims to simplify JSON based API implementation process. It allows direct usage of request JSON data securely for inserting updating and selecting. Following example shows how to setup simple Product model module:
 
-#Introduction
+# Introduction
 
 **product.py**
 ```python
@@ -77,7 +77,7 @@ FROM "product"
 LEFT JOIN "site"."category" ON "category"."id"="product"."category_id"
 ```
 
-#Setup
+# Setup
 **pgsql-table** works with PostgreSQL using **psycopg2** connector module. It gets database connection using user defined Table.get_db function and returns using Table.put_db function. By this two function you can implement connection pool where get_db will accuire free connection from pool and put_db will return it back. Here is quick setup of ```config.py``` for **pgsql-table**:
 
 ```python
@@ -137,7 +137,7 @@ sql.Table.put_db = put_db
 
 Last 3 lines renders ORM ready to use. **init_db** creates 20 connection pool to PosgreSQL. It uses .env file to get database connection string from environment variable **DB**. .env file contains ```DB="dbname=gs1 user=postgres password=1234 host=127.0.0.1 port=5432"```
 
-#Filter
+# Filter
 
 ```python
 product.all(filter={
@@ -182,5 +182,5 @@ The result off filter will be an object. ```result.total``` containts count of t
 
 The result is also paged by ```limit``` parameter and is fetched for ```page```. ```page=3, limit=50``` results ```LIMIT 50 OFFSET 100 in query```.
 
-#All
+# All
 product.all() acts like product.filter() but result is simple list and result is not paged.
