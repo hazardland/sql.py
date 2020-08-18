@@ -1,5 +1,7 @@
 **pgsql-table** is an PostgreSQL ORM which aims to simplify JSON based API implementation process. It allows direct usage of request JSON data securely for inserting updating and selecting. Following example shows how to setup simple Product model module:
 
+#Introduction
+
 **product.py**
 ```python
 import sql
@@ -75,7 +77,8 @@ FROM "product"
 LEFT JOIN "site"."category" ON "category"."id"="product"."category_id"
 ```
 
-**pgsql-table** works with PostgreSQL using **psycopg2** connector module. It gets database connection using user defined Table.get_db function and returns using Table.put_db function. By this two function you can implement connection pool where get_db will accuire free connection from pool and put_db will return it back. Here is quick setup of config.py for **pgsql-table**:
+#Setup
+**pgsql-table** works with PostgreSQL using **psycopg2** connector module. It gets database connection using user defined Table.get_db function and returns using Table.put_db function. By this two function you can implement connection pool where get_db will accuire free connection from pool and put_db will return it back. Here is quick setup of ```config.py``` for **pgsql-table**:
 
 ```python
 import sys
@@ -134,6 +137,8 @@ sql.Table.put_db = put_db
 
 Last 3 lines renders ORM ready to use. **init_db** creates 20 connection pool to PosgreSQL. It uses .env file to get database connection string from environment variable **DB**. .env file contains ```DB="dbname=gs1 user=postgres password=1234 host=127.0.0.1 port=5432"```
 
+#Filter
+
 ```python
 product.all(filter={
         'price':{
@@ -152,20 +157,30 @@ product.all(filter={
         'field': 'price',
         'method': 'desc'
     }
+    page=3,
+    limit=50
 )
 ```
 
 The following query will be generated and executed:
 ```sql
-SELECT
-    product.id, product.name, product.price, product.category_id,
-    category.id, category.name
+SELECT product.id, product.name, product.price, product.category_id,category.id, category.name, COUNT(*) OVER()
 FROM "site"."product"
 LEFT JOIN "site"."category" ON "category"."id"="product"."category_id"
-WHERE (product."name" ILIKE %plumbus%
-    OR category."name" ILIKE %plumbus%)
+WHERE (product."name" ILIKE '%plumbus%'
+    OR category."name" ILIKE '%plumbus%')
     AND (product."price">=5.0
     AND product."price"<=1.0
     AND product."category_id"=1)
 ORDER BY product."price" DESC
+LIMIT 50 OFFSET 100
 ```
+Notice difference between ```filter``` and ```search```: While all criterias in ```filter``` must be matched in order to get record, From ```search``` at least one criteria must be matched. In shorts query looks like this: ```(search1 OR search2 OR search3) AND (filter1 AND filter2 AND filter3)```
+.
+
+The result off filter will be an object. ```result.total``` containts count of total items matching criterias. ```result.items``` contains list of item objects which represent ```Product``` class.
+
+The result is also paged by ```limit``` parameter and is fetched for ```page```. ```page=3, limit=50``` results ```LIMIT 50 OFFSET 100 in query```.
+
+#All
+product.all() acts like product.filter() but result is simple list and result is not paged.

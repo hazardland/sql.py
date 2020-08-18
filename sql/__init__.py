@@ -457,7 +457,7 @@ class Table(metaclass=MetaTable):
             cursor.execute(f"""SELECT {join.select()}
                              FROM {cls}
                              {join}
-                             WHERE {cls('id')}=%s""",
+                             WHERE {cls(cls.id)}=%s""",
                              (id,))
             join.row.data(cursor.fetchone())
             result = join.create()
@@ -482,7 +482,7 @@ class Table(metaclass=MetaTable):
                            FROM {cls}
                            {join}
                            WHERE {join.fields()}
-                           ORDER BY {cls.order('id', 'desc', order)}
+                           ORDER BY {cls.order(cls.id, 'desc', order)}
                            {f'LIMIT {int(limit)}' if limit else ''}""",
                            join.values()))
             log.debug(color.cyan('Total fetched %s'), cursor.rowcount)
@@ -522,7 +522,7 @@ class Table(metaclass=MetaTable):
                            FROM {cls}
                            {join}
                            WHERE {join.fields()}
-                           ORDER BY {join.order('id', 'desc', order)}
+                           ORDER BY {join.order(cls.id, 'desc', order)}
                            LIMIT %s OFFSET %s""",
                            join.values()+[limit, offset]))
             log.debug(color.cyan('Total fetched %s'), cursor.rowcount)
@@ -557,7 +557,7 @@ class Table(metaclass=MetaTable):
             cursor.execute(*debug(f"""WITH "{cls.name}" AS (
                                         UPDATE {cls}
                                         SET {update.fields()}
-                                        WHERE {cls('id')}=%s AND {filter.fields()}
+                                        WHERE {cls(cls.id)}=%s AND {filter.fields()}
                                         RETURNING {cls.select()}
                                     )
                                     SELECT {join.select()}
@@ -620,7 +620,7 @@ class Table(metaclass=MetaTable):
             db = cls.get_db()
             cursor = db.cursor()
             cursor.execute(*debug(f"""DELETE FROM {cls}
-                                    WHERE {cls('id')}=%s AND {filter.fields()}""",
+                                    WHERE {cls(cls.id)}=%s AND {filter.fields()}""",
                                 (id,)+filter.values()))
             return bool(cursor.rowcount)
         except Exception as error:

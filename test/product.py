@@ -1,5 +1,6 @@
 import sql
 import category
+import config
 
 class Product:
     def __init__(self, id, name):
@@ -44,7 +45,7 @@ def filter(page=1, limit=100, filter={}, order={}, search={}):
                         order=order,
                         search=search)
 
-product.all(filter={
+print(filter(filter={
         'price':{
             'from': 5,
             'to': 1
@@ -60,5 +61,7 @@ product.all(filter={
     order={
         'field': 'price',
         'method': 'desc'
-    }
-)
+    },
+    page=2,
+    limit=50
+).__dict__)
