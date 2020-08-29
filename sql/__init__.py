@@ -620,8 +620,8 @@ class Table(metaclass=MetaTable):
             db = cls.get_db()
             cursor = db.cursor()
             cursor.execute(*debug(f"""DELETE FROM {cls}
-                                    WHERE {cls(cls.id)}=%s AND {filter.fields()}""",
-                                (id,)+filter.values()))
+                                    WHERE {filter.fields()} AND {cls(cls.id)}=%s""",
+                                  filter.values(id)))
             return bool(cursor.rowcount)
         except Exception as error:
             raise error
