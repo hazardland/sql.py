@@ -7,10 +7,10 @@ setup(name='pgsql-table',
       author='Vakhtang Zardiashvili',
       author_email='hazardland@gmail.com',
       license='MIT',
-      version='0.4.2',
+      version='0.4.4',
       keywords='orm, pgsql, postgresql, model',
       packages=["sql"],
       url='https://github.com/hazardland/sql.py',
-      python_requires='>=3.7',
+      python_requires='>=3.6',
       install_requires=['python_dateutil']
      )

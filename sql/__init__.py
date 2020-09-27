@@ -181,7 +181,7 @@ class Table(metaclass=MetaTable):
         fields = []
         for field, config in cls.fields.items():
 
-            log.info(color.cyan('Parsing field %s %s'), field, config)
+            #log.info(color.cyan('Parsing field %s %s'), field, config)
 
             if field in data:
 
@@ -459,9 +459,9 @@ class Table(metaclass=MetaTable):
                              {join}
                              WHERE {cls(cls.id)}=%s""",
                              (id,))
-            join.row.data(cursor.fetchone())
-            result = join.create()
-            return result
+            if cursor.rowcount > 0:
+                join.row.data(cursor.fetchone())
+                return join.create()
         except Exception as error:
             raise error
         finally:
@@ -565,15 +565,24 @@ class Table(metaclass=MetaTable):
                                     {join}
                                     """,
                                 update.values(id)+filter.values()))
-            join.row.data(cursor.fetchone())
-            result = join.create()
+            if cursor.rowcount > 0:
+                join.row.data(cursor.fetchone())
+                return join.create()
         except Exception as error:
+            match = re.search(r''+cls.name+'_unique_(.*?)_index', str(error))
+            print(match)
+            if match is not None and match.lastindex > 0:
+                index = match.group(1)
+                if index in cls.fields:
+                    raise UniqueError(index)
+                for field, config in cls.fields:
+                    if 'field' in config and config['field'] == index:
+                        raise UniqueError(field)
             raise error
         finally:
             db.commit()
             cls.put_db(db)
 
-        return result
 
     @classmethod
     def add(cls, data):
@@ -593,8 +602,9 @@ class Table(metaclass=MetaTable):
                                     {join}
                                     """,
                                 insert.values()))
-            join.row.data(cursor.fetchone())
-            result = join.create()
+            if cursor.rowcount > 0:
+                join.row.data(cursor.fetchone())
+                return join.create()
 
         except Exception as error:
             match = re.search(r''+cls.name+'_unique_(.*?)_index', str(error))
@@ -611,7 +621,6 @@ class Table(metaclass=MetaTable):
             db.commit()
             cls.put_db(db)
 
-        return result
 
     @classmethod
     def delete(cls, id, filter={}):
