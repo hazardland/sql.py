@@ -449,7 +449,8 @@ class Table(metaclass=MetaTable):
 
         #return cls.type(**params)
     @classmethod
-    def get(cls, id):
+    def get(cls, id, filter={}):
+        filter = cls.where(filter)
         join = Join(cls)
         try:
             db = cls.get_db()
@@ -457,8 +458,8 @@ class Table(metaclass=MetaTable):
             cursor.execute(f"""SELECT {join.select()}
                              FROM {cls}
                              {join}
-                             WHERE {cls(cls.id)}=%s""",
-                             (id,))
+                             WHERE {cls(cls.id)}=%s AND {filter.fields()}""",
+                             [id,]+filter.values())
             if cursor.rowcount > 0:
                 join.row.data(cursor.fetchone())
                 return join.create()
@@ -657,6 +658,7 @@ class Row:
         self.__data = data
     def get(self, name):
         if self.offsets[name]['count'] > 1:
+            #log.info(color.cyan('Row offset %s'), name)
             #print(name, self.offsets[name], self.__data[self.offsets[name]['position']:self.offsets[name]['position']+self.offsets[name]['count']])
             return self.__data[self.offsets[name]['position']:self.offsets[name]['position']+self.offsets[name]['count']]
         return self.__data[self.offsets[name]['position']]
@@ -758,7 +760,7 @@ class Result():
         self.items.append(item)
 
 def debug(query, params):
-    params_debug = tuple([str(param) for param in params])
+    params_debug = tuple(["'"+str(param)+"'" for param in params])
 
     query_debug = ''
     for line in query.splitlines():
