@@ -1,9 +1,15 @@
+import sys
+import os
+import sys
 import inspect
 import json
 import logging as log
 from functools import wraps
 from dateutil.parser import parse as parse_date
 import re
+
+if sys.platform.lower() == "win32":
+    os.system('color')
 
 ESCAPE = '"'
 
@@ -111,6 +117,42 @@ FIELD OPTIONS
     }
 '''
 
+class Db:
+    def __init__(self, config, size=20):
+        self.pool = None
+        self.config = config
+        self.size = size
+
+    def get(self, key=None):
+        if self.pool is None:
+            self.init()
+        conn = self.pool.getconn(key)
+        log.info(color.yellow('Using db connection at address %s'), id(conn))
+        return conn
+
+    def put(self, conn, key=None):
+        log.info(color.yellow('Releasing db connection at address %s'), id(conn))
+        self.pool.putconn(conn, key=key)
+
+    def init(self):
+        import psycopg2.pool
+        try:
+            self.pool = psycopg2.pool.ThreadedConnectionPool(1, self.size, self.config)
+            log.info(color.cyan('Initialized db connection pool'))
+        except psycopg2.OperationalError as e:
+            log.error(e)
+            sys.exit(0)
+
+    def version(self):
+        db = None
+        try:
+            db = self.get()
+            cursor = db.cursor()
+            cursor.execute(*debug('SELECT VERSION()'))
+        finally:
+            self.put(db)
+        return cursor.fetchone()[0]
+
 class MetaTable(type):
     def __repr__(cls):
         return "<Table '"+str(cls)+"'>"
@@ -138,8 +180,8 @@ class Table(metaclass=MetaTable):
     fields = dict()
     joins = dict()
     #order = {'field':'id', 'method':'desc'}
-    get_db = lambda: None
-    put_db = lambda db: None
+    db = None
+
     @classmethod
     def str(cls):
         result = ''
@@ -172,7 +214,7 @@ class Table(metaclass=MetaTable):
 
     @classmethod
     def where(cls, data, separator='AND'):
-        log.info(color.cyan('Where data %s'), data)
+        #log.debug(color.cyan('Where data %s'), data)
 
         if data is None:
             raise MissingInput()
@@ -215,7 +257,7 @@ class Table(metaclass=MetaTable):
                     if 'options' in config and (isinstance(value, list) or isinstance(value, tuple) or isinstance(value, set)):
                         fields.append(cls.name+'."'+column+"\" IN ("+','.join(['%s'] * len(value))+")")
                         for item in value:
-                            log.info(color.cyan('%s'), item)
+                            #log.info(color.cyan('%s'), item)
                             values.append(cls.value(field, item))
                     elif (config['type'] == 'int' or
                         config['type'] == 'date' or
@@ -235,7 +277,7 @@ class Table(metaclass=MetaTable):
                             fields.append(cls.name+'."'+column+"\"<=%s")
                         if (isinstance(value, list) or isinstance(value, tuple) or isinstance(value, set)) and len(value):
                             for item in value:
-                                log.info(color.cyan('%s'), item)
+                                #log.info(color.cyan('%s'), item)
                                 values.append(cls.value(field, item))
                             fields.append(cls.name+'."'+column+"\" IN ("+','.join(['%s'] * len(value))+")")
                     else:
@@ -453,7 +495,7 @@ class Table(metaclass=MetaTable):
         filter = cls.where(filter)
         join = Join(cls)
         try:
-            db = cls.get_db()
+            db = cls.db.get()
             cursor = db.cursor()
             cursor.execute(f"""SELECT {join.select()}
                              FROM {cls}
@@ -467,7 +509,7 @@ class Table(metaclass=MetaTable):
             raise error
         finally:
             db.commit()
-            cls.put_db(db)
+            cls.db.put(db)
 
     @classmethod
     def all(cls, filter={}, order={}, search={}, limit=None):
@@ -476,7 +518,7 @@ class Table(metaclass=MetaTable):
         result = []
 
         try:
-            db = cls.get_db()
+            db = cls.db.get()
             cursor = db.cursor()
             cursor.execute(*debug(f"""SELECT
                            {join.select()}
@@ -498,7 +540,7 @@ class Table(metaclass=MetaTable):
             raise error
         finally:
             db.commit()
-            cls.put_db(db)
+            cls.db.put(db)
 
         return result
 
@@ -515,7 +557,7 @@ class Table(metaclass=MetaTable):
         db = None
 
         try:
-            db = cls.get_db()
+            db = cls.db.get()
             cursor = db.cursor()
             cursor.execute(*debug(f"""SELECT
                            {join.select()},
@@ -540,7 +582,7 @@ class Table(metaclass=MetaTable):
             raise error
         finally:
             db.commit()
-            cls.put_db(db)
+            cls.db.put(db)
 
         if result.total is None:
             result.total = 0
@@ -553,7 +595,7 @@ class Table(metaclass=MetaTable):
         join = Join(cls)
         update = cls.update(data)
         try:
-            db = cls.get_db()
+            db = cls.db.get()
             cursor = db.cursor()
             cursor.execute(*debug(f"""WITH "{cls.name}" AS (
                                         UPDATE {cls}
@@ -582,7 +624,7 @@ class Table(metaclass=MetaTable):
             raise error
         finally:
             db.commit()
-            cls.put_db(db)
+            cls.db.put(db)
 
 
     @classmethod
@@ -590,7 +632,7 @@ class Table(metaclass=MetaTable):
         join = Join(cls)
         insert = cls.insert(data)
         try:
-            db = cls.get_db()
+            db = cls.db.get()
             cursor = db.cursor()
             cursor.execute(*debug(f"""WITH "{cls.name}" AS (
                                         INSERT INTO {cls}
@@ -603,6 +645,7 @@ class Table(metaclass=MetaTable):
                                     {join}
                                     """,
                                 insert.values()))
+            log.debug(color.cyan('Total fetched %s'), cursor.rowcount)
             if cursor.rowcount > 0:
                 join.row.data(cursor.fetchone())
                 return join.create()
@@ -620,14 +663,14 @@ class Table(metaclass=MetaTable):
             raise error
         finally:
             db.commit()
-            cls.put_db(db)
+            cls.db.put(db)
 
 
     @classmethod
     def delete(cls, id, filter={}):
         filter = cls.where(filter)
         try:
-            db = cls.get_db()
+            db = cls.db.get()
             cursor = db.cursor()
             cursor.execute(*debug(f"""DELETE FROM {cls}
                                     WHERE {filter.fields()} AND {cls(cls.id)}=%s""",
@@ -637,7 +680,7 @@ class Table(metaclass=MetaTable):
             raise error
         finally:
             db.commit()
-            cls.put_db(db)
+            cls.db.put(db)
 
         return False
 
@@ -759,7 +802,7 @@ class Result():
         #log.info('Adding %s', item)
         self.items.append(item)
 
-def debug(query, params):
+def debug(query, params=[]):
     params_debug = tuple(["'"+str(param)+"'" for param in params])
 
     query_debug = ''

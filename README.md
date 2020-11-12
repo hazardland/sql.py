@@ -1,6 +1,6 @@
 **pgsql-table** is an PostgreSQL ORM which aims to simplify JSON based API implementation process. It allows direct usage of request JSON data securely for inserting updating and selecting.
 
-<!-- MarkdownTOC autolink=true -->
+<!-- MarkdownTOC autolink=true levels="1" autoanchor="true"-->
 
 - [Introduction](#introduction)
 - [Setup](#setup)
@@ -8,6 +8,7 @@
 - [All](#all)
 
 <!-- /MarkdownTOC -->
+
 
 
 # Introduction
@@ -90,64 +91,59 @@ LEFT JOIN "site"."category" ON "category"."id"="product"."category_id"
 ```
 
 # Setup
-**pgsql-table** works with PostgreSQL using **psycopg2** connector module. It gets database connection using user defined Table.get_db function and returns using Table.put_db function. By this two function you can implement connection pool where get_db will accuire free connection from pool and put_db will return it back. Here is quick setup of ```config.py``` for **pgsql-table**:
-
+#### Zeroconfig
+**pgsql-table** comes with sql.Db class which is used by sql.Table class to get a database connection. To prepare sql.Table you need to attach configured sql.Db object somewhere in your config file:
 ```python
-import sys
-import os
-
-import psycopg2
-from psycopg2 import pool
-
-from dotenv import load_dotenv, find_dotenv
-load_dotenv(find_dotenv())
-
-import logging as log
-log.basicConfig(level=log.DEBUG)
-
-# Ignore this part
-if sys.platform.lower() == "win32":
-    os.system('color')
-class color():
-    black = lambda x: '\033[30m' + str(x)+'\033[0;39m'
-    red = lambda x: '\033[31m' + str(x)+'\033[0;39m'
-    green = lambda x: '\033[32m' + str(x)+'\033[0;39m'
-    yellow = lambda x: '\033[33m' + str(x)+'\033[0;39m'
-    blue = lambda x: '\033[34m' + str(x)+'\033[0;39m'
-    magenta = lambda x: '\033[35m' + str(x)+'\033[0;39m'
-    cyan = lambda x: '\033[36m' + str(x)+'\033[0;39m'
-    white = lambda x: '\033[37m' + str(x)+'\033[0;39m'
-
-def get_db(key=None):
-    if not hasattr(get_db, 'pool'):
-        init_db()
-    conn = getattr(get_db, 'pool').getconn(key)
-    log.info(color.yellow('Using db connection at address %s'), id(conn))
-    return conn
-
-def put_db(conn, key=None):
-    log.info(color.yellow('Releasing db connection at address %s'), id(conn))
-    getattr(get_db, 'pool').putconn(conn, key=key)
-
-
-def init_db():
-    if hasattr(get_db, 'pool'):
-        log.info(color.cyan('Db pool already initialized at address %s'), id(getattr(get_db, 'pool')))
-        return
-    try:
-        setattr(get_db, 'pool', psycopg2.pool.ThreadedConnectionPool(1, 20, os.getenv("DB")))
-        log.info(color.cyan('Initialized db'))
-    except psycopg2.OperationalError as e:
-        log.error(e)
-        sys.exit(0)
-
-# Attach db functions to orm
 import sql
-sql.Table.get_db = get_db
-sql.Table.put_db = put_db
+sql.Table.db = sql.Db('dbname=postgres user=postgres password=1234 host=127.0.0.1 port=5432')
+```
+sql.Db class uses psycopg2.pool.ThreadedConnectionPool to create database connection pool which can be used in multi threaded enviornment safely, connection pool size is defined by second parameter sql.Db('...', 20) and by default 20 connections are created. So for example if you run Flask app worker with 4 threads, each thread can get a free connection, use it and then return it back in the pool.
+
+sql.Db class is based on ```psycopg2``` modole but does not comes with dependency in case you will want to write your own sql.Db class or just use ORM to connect to MySQL.
+
+#### Some advanced setup
+Thats it, below is some advanced usage practices, like working with multiple different databases.
+
+Before every query Table will get db connection from connection pool using self.db.get() and after using it the connection will be returned back to the pool using self.db.put(connection). Note that by default the connection pool is initialized during the very first call of self.db.get(), but if you want to initialize it somewhere during loading your app do it by calling sql.Table.db.init().
+
+The fact that sql.Table has its own db property for accessing database connection can be used to have different tables with different database connections:
+```python
+import sql
+
+# Define new class for db1
+class TableOnDb1(sql.Table):
+    pass
+# Define new class for db2
+class TableOnDb2(sql.Table):
+    pass
+
+# Define connection for db1
+TableOnDb1.db = sql.Db('db1 connection string')
+# Define connection for db2
+TableOnDb2.db = sql.Db('db2 connection string')
+
+
+# Define tables for db1
+class Table1(TableOnDb1)
+    pass
+
+class Table2(TableOnDb1)
+    pass
+
+# Define tables for db2
+class Table3(TableOnDb1)
+    pass
+
+class Table4(TableOnDb2)
+    pass
 ```
 
-Last 3 lines renders ORM ready to use. **init_db** creates 20 connection pool to PosgreSQL. It uses .env file to get database connection string from environment variable **DB**. .env file contains ```DB="dbname=gs1 user=postgres password=1234 host=127.0.0.1 port=5432"```
+Note that I once used this ORM for MySQL. All SELECT based methods will work if you set:
+```python
+sql.ESCAPE = '`'
+```
+But for the moment RETURN statements does not work in MySQL so UPDATE and INSERT based methods are problem.
+
 
 # Filter
 
@@ -196,3 +192,9 @@ The result is also paged by ```limit``` parameter and is fetched for ```page```.
 
 # All
 product.all() acts like product.filter() but result is simple list and result is not paged.
+
+# Get
+
+# Add
+
+# Save
