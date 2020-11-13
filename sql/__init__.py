@@ -497,11 +497,11 @@ class Table(metaclass=MetaTable):
         try:
             db = cls.db.get()
             cursor = db.cursor()
-            cursor.execute(f"""SELECT {join.select()}
+            cursor.execute(*debug(f"""SELECT {join.select()}
                              FROM {cls}
                              {join}
                              WHERE {cls(cls.id)}=%s AND {filter.fields()}""",
-                             [id,]+filter.values())
+                             [id,]+filter.values()))
             if cursor.rowcount > 0:
                 join.row.data(cursor.fetchone())
                 return join.create()
@@ -805,7 +805,7 @@ class Result():
 def debug(query, params=[]):
     params_debug = tuple(["'"+str(param)+"'" for param in params])
 
-    query_debug = ''
+    query_debug = '\n'
     for line in query.splitlines():
         query_debug += line.strip()+" "
 
@@ -816,11 +816,11 @@ def debug(query, params=[]):
     query_debug = query_debug.replace('UNION', '\n'+color.blue('UNION'))
     query_debug = query_debug.replace('LEFT JOIN', '\n'+color.yellow('LEFT JOIN'))
     query_debug = query_debug.replace('INNER JOIN', '\n'+color.blue('INNER JOIN'))
-    query_debug = query_debug.replace('WHERE', '\n'+color.green('WHERE'))
+    query_debug = query_debug.replace('WHERE', '\n'+color.green('WHERE')+'\n   ')
     query_debug = query_debug.replace(' AND ', '\n    '+color.yellow('AND')+' ')
     query_debug = query_debug.replace(' OR ', '\n    '+color.red('OR')+' ')
     query_debug = query_debug.replace(' ON ', ' '+color.cyan('ON')+' ')
-    query_debug = query_debug.replace('WITH ', color.cyan('WITH')+' ')
+    query_debug = query_debug.replace('WITH ', '\n'+color.cyan('WITH')+' ')
     query_debug = query_debug.replace('FROM', '\n'+color.green('FROM'))
     query_debug = query_debug.replace('ORDER', '\n'+color.red('ORDER'))
     query_debug = query_debug.replace('LIMIT', '\n'+color.yellow('LIMIT'))
@@ -835,6 +835,8 @@ def debug(query, params=[]):
     query_debug = query_debug.replace('WHEN', color.green('WHEN'))
     query_debug = query_debug.replace('OVER', color.green('OVER'))
     query_debug = query_debug.replace('COUNT', color.red('COUNT'))
+    query_debug = query_debug.replace('RETURNING', '\n'+color.cyan('RETURNING'))
+    query_debug = query_debug.replace('VALUES', '\n'+color.cyan('VALUES'))
     query_debug += '\n'
 
     if query_debug.count('%s') != len(params_debug):

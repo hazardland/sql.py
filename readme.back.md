@@ -428,3 +428,81 @@ except Exception as error:
     # In case nothing updated
     print(error)
 ```
+
+
+
+
+```python
+import sql
+import logging as log
+from hashlib
+
+log.basicConfig(level=log.DEBUG)
+
+sql.Table.db = sql.Db('dbname=youtube user=postgres password=1234 host=127.0.0.1 port=5432')
+
+class User:
+    def __init__(self):
+        self.id = None
+        self.login = None
+        self.status = None
+        self.created_at = None
+
+def md5(plain):
+    return hashlib.md5(plain.encode()).hexdigest()
+
+class Table(sql.Table):
+    name = 'users'
+    type = User
+    fields = {
+        'id': {'type': 'int'},
+        'login': {},
+        'password': {
+            'encoder': lambda plain:
+        },
+        'status': {
+            'options': ['active', 'disabled']
+        },
+        'created_at': {'type': 'date'}
+    }
+
+user = Table.add({
+        'login': 'Merab',
+        'password': '123',
+        'status': 'active'
+    })
+print(user.__dict__)
+
+user = Table.get(14)
+print(user.__dict__)
+
+user = Table.save(14, {'status':'disabled', 'password':'qwerty'})
+print(user.__dict__)
+
+users = Table.all(filter={'login':'mer', 'status':'disabled'})
+for user in users:
+    print(user.__dict__)
+
+Table.delete(5)
+
+result = Table.filter(page=2, limit=3, order={'method':'asc'})
+for user in result.items:
+    print(user.__dict__)
+
+db = None
+try:
+    db = Table.db.get()
+    cursor = db.cursor()
+    cursor.execute(f"""
+        SELECT {Table.select()}
+        FROM {Table}
+        WHERE
+        {Table('username')}=%s
+        AND {Table('password')}""",
+        ('merab', md5('123')))
+    user = Table.create(cursor.fetchone())
+    prin(user.__dict__)
+finally:
+    Table.db.put(db)
+
+```

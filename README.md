@@ -198,3 +198,117 @@ product.all() acts like product.filter() but result is simple list and result is
 # Add
 
 # Save
+
+# Introduction
+
+## Install
+```
+pip install psycopg2-binary
+pip install pgsql-table
+```
+
+# Configure
+Import library, set logging level to debug to see what queries are generated and configure connection pool:
+```python
+import sql
+
+import logging as log
+log.basicConfig(level=log.DEBUG)
+
+sql.Table.db = sql.Db('dbname=youtube user=postgres password=1234 host=127.0.0.1 port=5432')
+```
+
+# Create class
+```python
+# Defining properties is not required but it is nice
+class User:
+    def __init__(self):
+        self.id = None
+        self.login = None
+        self.status = None
+        self.created_at = None
+```
+
+# Create model
+```python
+# We will need our md5 function later
+import hashlib
+def md5(plain):
+    return hashlib.md5(plain.encode()).hexdigest()
+
+# The model
+class Table(sql.Table):
+    name = 'users'
+    type = User
+    fields = {
+        'id': {'type': 'int'},
+        'login': {}, # Default is string
+        'password': {'encoder': md5}, # md5 function will encode values for this field
+        'status': {'options': ['active', 'disabled']}, # Only this values are allowed for this field
+        'created_at': {'type': 'date'}
+    }
+```
+
+# Add
+```python
+# Just pass dictionary to add method
+# It will return object of User class if insert succeedes
+user = Table.add({
+        'login': 'John',
+        'password': '123',
+        'status': 'active'
+    })
+print(user.__dict__)
+```
+Following query will be generated:
+![Add query](https://raw.githubusercontent.com/hazardland/sql.py/master/images/query_add.png)
+
+
+Table.add({
+        'login': 'Joe',
+        'password': '123',
+        'status': 'active'
+    })
+
+Table.add({
+        'login': 'David',
+        'password': '123',
+        'status': 'active'
+    })
+
+user = Table.get(14)
+print(user.__dict__)
+
+user = Table.save(14, {'status':'disabled', 'password':'qwerty'})
+print(user.__dict__)
+
+users = Table.all(filter={'login':'jo', 'status':'disabled'})
+for user in users:
+    print(user.__dict__)
+
+Table.delete(5)
+
+result = Table.filter(page=2,
+                      limit=3,
+                      order={'method':'asc'},
+                      filter={'status':'active'})
+for user in result.items:
+    print(user.__dict__)
+
+db = None
+try:
+    db = Table.db.get()
+    cursor = db.cursor()
+    cursor.execute(*sql.debug(f"""
+        SELECT {Table.select()}
+        FROM {Table}
+        WHERE
+        {Table('login')}=%s
+        AND {Table('password')}=%s
+        """,
+        ('John', md5('123'))))
+    if cursor.rowcount > 0:
+        user = Table.create(cursor.fetchone())
+        print(user.__dict__)
+finally:
+    Table.db.put(db)
