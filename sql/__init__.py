@@ -329,7 +329,7 @@ class Table(metaclass=MetaTable):
         column = cls.name+'.'+ESCAPE+(config['field'] if 'field' in config else field)+ESCAPE
 
         if config['type'] == 'json':
-            if 'key' is None:
+            if key is None:
                 raise MissingField()
             if 'keys' not in config:
                 raise MissingConfig()
