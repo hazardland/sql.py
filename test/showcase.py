@@ -1,65 +1,26 @@
-<!-- MarkdownTOC autolink=true levels="1" autoanchor="true"-->
-
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Prepare](#prepare)
-- [Class](#class)
-- [Model](#model)
-- [Add](#add)
-- [Get](#get)
-- [Save](#save)
-- [All](#all)
-- [Delete](#delete)
-- [Filter](#filter)
-
-<!-- /MarkdownTOC -->
-
-
-![](https://raw.githubusercontent.com/hazardland/sql.py/master/images/query.png)
-
-
-# Installation
-```
-pip install psycopg2-binary
-pip install pgsql-table
-```
-
-# Configuration
-
-```python
 import sql
-```
-Set log level to debug to see generated queries
 
-```python
+# Set log level to debug to see generated queries
 import logging as log
 log.basicConfig(level=log.DEBUG)
-```
 
-Configure default database connetion:
-```python
+# Configure default database connetion
+# (Connetion pool is made when only before first query)
 sql.db = sql.Db('dbname=postgres user=postgres password=1234 host=127.0.0.1 port=5432')
-```
-(Connetion pool is made when only before first query)
-Alternatively every model can have its own database connection:
-```python
-sql.Table.db = sql.Db('some other database connection string')
-```
-Set default schema
-```python
-sql.Table.schema = 'demo'
-```
-(Models have their own different schemas)
+# Alternatively every model can have its own database connection
+# sql.Table.db = sql.Db('some other database connection string')
 
-# Prepare
-Let us create demo schema:
-```python
+# Set default schema
+# (Models have their own different schemas)
+sql.Table.schema = 'demo'
+
+log.getLogger().setLevel(log.INFO)
+
+# Create demo schema
 sql.query('DROP SCHEMA IF EXISTS demo CASCADE')
 sql.query('CREATE SCHEMA IF NOT EXISTS demo')
-```
 
-We will create users table and groups table, users table will reference to groups table to showcase some joins
-```python
+# Create tables
 sql.query("""
     CREATE TABLE IF NOT EXISTS demo.groups (
         id SMALLSERIAL PRIMARY KEY NOT NULL,
@@ -76,11 +37,11 @@ CREATE TABLE IF NOT EXISTS demo.users (
     group_id SMALLINT REFERENCES demo.groups(id),
     created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
 )""")
-```
 
-# Class
-Now we need classes to represent users and groups table rows as objects:
-```python
+
+log.getLogger().setLevel(log.DEBUG)
+
+# Create classes
 class Group:
     def __init__(self):
         self.id = None
@@ -93,19 +54,13 @@ class User:
         self.fullname = None
         self.status = None
         self.created_at = None
-```
 
-# Model
-
-Let us pause a bit and create friendly md5 hash function that we might need later for hashing passwords:
-```python
+# Just a friendly md5 function which hashes strings
 import hashlib
 def md5(plain):
     return hashlib.md5(plain.encode()).hexdigest()
-```
 
-Default model is sql.Table, we extend default model for Group. The naming goes like this: Class name in singular (Group) and model name which will produce objects of this class in plural (Groups):
-```python
+# Models
 class Groups(sql.Table):
     name = 'groups'
     type = Group
@@ -113,10 +68,7 @@ class Groups(sql.Table):
         'id': {'type': 'int'},
         'name': {}
     }
-```
 
-And user model also:
-```python
 class Users(sql.Table):
     name = 'users' # Actual table name
     type = User
@@ -132,26 +84,22 @@ class Users(sql.Table):
     joins = {
         'group': {'table':Groups, 'field':'group_id'}
     }
-```
 
-# Add
-Create some groups by simply calling .add and passing dictionary:
-```python
+
+# Create groups
 manager = Groups.add({'name':'Manager'})
 customer = Groups.add({'name':'Customer'})
-```
-Add method will generate and run following query:
-```sql
+# Following query will be generated:
+"""
 WITH "groups" AS (
 INSERT INTO "demo"."groups" (name)
 VALUES ('Manager')
 RETURNING groups.id, groups.name )
 SELECT groups.id, groups.name
 FROM "groups"
-```
+"""
 
-Create users
-```python
+# Create users
 user = Users.add({
         'username': 'john',
         'fullname': 'John Doe',
@@ -159,9 +107,9 @@ user = Users.add({
         'status': 'active',
         'group_id': manager.id
     })
-```
-Following query will be generated:
-```sql
+
+# Following query will be generated:
+"""
 WITH "users" AS (
 INSERT INTO "demo"."users" (username, fullname, password, status, group_id)
 VALUES ('john', 'John Doe', '202cb962ac59075b964b07152d234b70', 'active', '1')
@@ -169,21 +117,18 @@ RETURNING users.id, users.username, users.fullname, users.password, users.status
 SELECT users.id, users.username, users.fullname, users.password, users.status, users.group_id, users.created_at,groups.id, groups.name
 FROM "users"
 LEFT JOIN "demo"."groups" ON "groups"."id"="users"."group_id"
-```
+"""
 
-Let us make pretty print function
-```python
+# Let us make pretty print function
 import json
 def pprint(object):
     print(json.dumps(object, indent=4, default=lambda x: x.__dict__ if hasattr(x, '__dict__') else str(x)))
-```
 
-Actually user is an object of class User, but pprint will visualise it like a dictionary:
-```python
+
 pprint(user)
-```
-Outputs:
-```python
+# Actually user is an object of class User
+# But pprint will visualise it like a dictionary
+"""
 {
     "id": 1,
     "username": "john",
@@ -197,15 +142,31 @@ Outputs:
         "name": "Manager"
     }
 }
-```
-Notice that password we input was 123 and in query it is md5 hash thanks to encoder defined to that field.
+"""
+# Note that password we input was 123 and in query it is md5 hash thanks to encoder defined to that field
 
-Here we add some more users for scientific purposes:
-```python
+# Adding some more users
+log.getLogger().setLevel(log.INFO)
+Users.add({
+        'username': 'joe',
+        'fullname': 'Joe Rogan',
+        'password': '123',
+        'status': 'active',
+        'group_id': customer.id
+
+    })
+
+Users.add({
+        'username': 'lex',
+        'fullname': 'Lex Fridman',
+        'password': '123',
+        'status': 'active',
+        'group_id': customer.id
+    })
+
+# Generating some random ones
 import random
 random_string = lambda: ''.join(random.choice('abcdefghijklmnopqrstwxyz') for j in range(random.randrange(3, 9)))
-
-log.getLogger().setLevel(log.INFO)
 for i in range(300):
     Users.add({
         'username': random_string(),
@@ -214,28 +175,22 @@ for i in range(300):
         'password': '123',
         'status': 'active'
         })
-log.getLogger().setLevel(log.DEBUG)
-```
 
-# Get
-```python
+log.getLogger().setLevel(log.DEBUG)
+
+# Get user by id
 user = Users.get(1)
-```
-Wich will get user by following query and becaus we defined join on groups table join also will be present in query:
-```sql
+"""
 SELECT users.id, users.username, users.fullname, users.password, users.status, users.group_id, users.created_at,groups.id, groups.name
 FROM "demo"."users"
 LEFT JOIN "demo"."groups" ON "groups"."id"="users"."group_id"
 WHERE
     "users"."id"='1'
     AND 1=1
-```
-Let us look inside User object
-```python
+"""
+
 pprint(user)
-```
-Which outputs:
-```python
+"""
 {
     "id": 1,
     "username": "john",
@@ -249,16 +204,10 @@ Which outputs:
         "name": "Manager"
     }
 }
-```
-If you look closer you see that even user.group is an object, actually it is object of class Group
-
-# Save
-Saving happens via id and dict corresponding fields and values, save returns updated object of User:
-```python
+"""
+# Save user
 user = Users.save(1, {'status':'disabled', 'password':'qwerty'})
-```
-Generated query:
-```sql
+"""
 WITH "users" AS (
 UPDATE "demo"."users" SET password='d8578edf8458ce06fbc5bb76a58c5ca4', status='disabled'
 WHERE
@@ -268,15 +217,10 @@ RETURNING users.id, users.username, users.fullname, users.password, users.status
 SELECT users.id, users.username, users.fullname, users.password, users.status, users.group_id, users.created_at,groups.id, groups.name
 FROM "users"
 LEFT JOIN "demo"."groups" ON "groups"."id"="users"."group_id"
-```
-Everything happens in same query: update, select and also join on groups table
+"""
 
-user in case of success now contains actually updated object:
-```python
-pprint(user)
-```
-
-```python
+pprint(user) # Changes affected
+"""
 {
     "id": 1,
     "username": "john",
@@ -290,10 +234,8 @@ pprint(user)
         "name": "Manager"
     }
 }
-```
+"""
 
-# All
-```python
 users = Users.all(filter={
                             'id': {
                                 'from':1,
@@ -311,9 +253,7 @@ users = Users.all(filter={
                    limit=2,
                    order={'field':'username', 'method':'asc'}
                    )
-```
-Query:
-```sql
+"""
 SELECT users.id, users.username, users.fullname, users.password, users.status, users.group_id, users.created_at,groups.id, groups.name
 FROM "demo"."users"
 LEFT JOIN "demo"."groups" ON "groups"."id"="users"."group_id"
@@ -324,14 +264,12 @@ WHERE
     AND users."status"='disabled'
     AND groups."id"='2')
 ORDER BY users."id" DESC
-```
-Difference between filter and search is that search consists with only ```OR``` criterias and filter with ```AND```.
+"""
+# Difference between filter and search is that
+# search consists with OR criterias and filter with AND
 
-```python
 pprint(users)
-```
-
-```python
+"""
 [
     {
         "id": 122,
@@ -360,32 +298,25 @@ pprint(users)
         }
     }
 ]
-```
+"""
 
-# Delete
-```python
+# Delete user
 Users.delete(3)
-```
-
-```sql
+"""
 DELETE
 FROM "demo"."users"
 WHERE
     1=1
     AND "users"."id"='3'
-```
+"""
 
-# Filter
-In addition with Table.all, Table.filter has paging and result is object of sql.Result:
-```python
+# In addition with Table.all, Table.filter has paging and result is object of sql.Result
 result = Users.filter(page=4,
                       limit=3,
                       order={'method':'asc'},
                       filter={'status':'active', 'group':{'id': customer.id}},
                       search={'username':'j', 'fullname':'j'})
-```
-
-```sql
+"""
 SELECT users.id, users.username, users.fullname, users.password, users.status, users.group_id, users.created_at,groups.id, groups.name, COUNT(*) OVER()
 FROM "demo"."users"
 LEFT JOIN "demo"."groups" ON "groups"."id"="users"."group_id"
@@ -396,15 +327,11 @@ WHERE
     AND groups."id"='2')
 ORDER BY users."id" ASC
 LIMIT '3' OFFSET '9'
-```
+"""
+# Selecting 3 rows starting from 9th row as we have per page limit=3 from 9-12 will be items for 4th page
 
-Selecting 3 rows starting from 9th row as we have per page limit=3 from 9-12 will be items for 4th page
-
-```python
 pprint(result)
-```
-
-```python
+"""
 {
     "total": 80,
     "items": [
@@ -449,11 +376,11 @@ pprint(result)
         }
     ]
 }
-```
+"""
 
-# Custom
-But if you want to create some custom query Model class helps a lot with query templating and converting select result into objects of User:
-```python
+# But if you want to create some custom query
+# Query class helps a lot with query templating
+# and converting select result into objects of User
 db = None
 try:
     db = Users.db.get()
@@ -472,4 +399,3 @@ try:
         pprint(user)
 finally:
     Users.db.put(db)
-```

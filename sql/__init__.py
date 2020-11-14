@@ -8,6 +8,8 @@ from functools import wraps
 from dateutil.parser import parse as parse_date
 import re
 
+db = None
+
 if sys.platform.lower() == "win32":
     os.system('color')
 
@@ -122,23 +124,25 @@ class Db:
         self.pool = None
         self.config = config
         self.size = size
+        if Table.db is None:
+            Table.db = self
 
     def get(self, key=None):
         if self.pool is None:
             self.init()
         conn = self.pool.getconn(key)
-        log.info(color.yellow('Using db connection at address %s'), id(conn))
+        log.debug(color.yellow('Using db connection at address %s'), id(conn))
         return conn
 
     def put(self, conn, key=None):
-        log.info(color.yellow('Releasing db connection at address %s'), id(conn))
+        log.debug(color.yellow('Releasing db connection at address %s'), id(conn))
         self.pool.putconn(conn, key=key)
 
     def init(self):
         import psycopg2.pool
         try:
             self.pool = psycopg2.pool.ThreadedConnectionPool(1, self.size, self.config)
-            log.info(color.cyan('Initialized db connection pool'))
+            log.debug(color.cyan('Initialized db connection pool'))
         except psycopg2.OperationalError as e:
             log.error(e)
             sys.exit(0)
@@ -223,7 +227,7 @@ class Table(metaclass=MetaTable):
         fields = []
         for field, config in cls.fields.items():
 
-            #log.info(color.cyan('Parsing field %s %s'), field, config)
+            #log.debug(color.cyan('Parsing field %s %s'), field, config)
 
             if field in data:
 
@@ -257,7 +261,7 @@ class Table(metaclass=MetaTable):
                     if 'options' in config and (isinstance(value, list) or isinstance(value, tuple) or isinstance(value, set)):
                         fields.append(cls.name+'."'+column+"\" IN ("+','.join(['%s'] * len(value))+")")
                         for item in value:
-                            #log.info(color.cyan('%s'), item)
+                            #log.debug(color.cyan('%s'), item)
                             values.append(cls.value(field, item))
                     elif (config['type'] == 'int' or
                         config['type'] == 'date' or
@@ -277,7 +281,7 @@ class Table(metaclass=MetaTable):
                             fields.append(cls.name+'."'+column+"\"<=%s")
                         if (isinstance(value, list) or isinstance(value, tuple) or isinstance(value, set)) and len(value):
                             for item in value:
-                                #log.info(color.cyan('%s'), item)
+                                #log.debug(color.cyan('%s'), item)
                                 values.append(cls.value(field, item))
                             fields.append(cls.name+'."'+column+"\" IN ("+','.join(['%s'] * len(value))+")")
                     else:
@@ -351,12 +355,12 @@ class Table(metaclass=MetaTable):
         if data is None:
             raise MissingInput()
 
-        #log.info(color.cyan('In a parse %s'), cls.fields)
+        #log.debug(color.cyan('In a parse %s'), cls.fields)
 
         values = []
         fields = []
         for field, config in cls.fields.items():
-            #log.info(color.cyan('Parsing field %s'), field)
+            #log.debug(color.cyan('Parsing field %s'), field)
             if mode in config and not config[mode]:
                 continue
 
@@ -440,6 +444,7 @@ class Table(metaclass=MetaTable):
 
     @classmethod
     def offset(cls):
+        #log.debug(color.red(cls.fields))
         count = 0
         for field, config in cls.fields.items():
             if 'select' in config and not config['select']:
@@ -701,7 +706,7 @@ class Row:
         self.__data = data
     def get(self, name):
         if self.offsets[name]['count'] > 1:
-            #log.info(color.cyan('Row offset %s'), name)
+            #log.debug(color.cyan('Row offset %s'), name)
             #print(name, self.offsets[name], self.__data[self.offsets[name]['position']:self.offsets[name]['position']+self.offsets[name]['count']])
             return self.__data[self.offsets[name]['position']:self.offsets[name]['position']+self.offsets[name]['count']]
         return self.__data[self.offsets[name]['position']]
@@ -799,7 +804,7 @@ class Result():
         self.total = total
         self.items = []
     def add(self, item):
-        #log.info('Adding %s', item)
+        #log.debug('Adding %s', item)
         self.items.append(item)
 
 def debug(query, params=[]):
@@ -813,6 +818,7 @@ def debug(query, params=[]):
     query_debug = query_debug.replace('INSERT', '\n'+color.cyan('INSERT'))
     query_debug = query_debug.replace('UPDATE', '\n'+color.cyan('UPDATE'))
     query_debug = query_debug.replace('DELETE', '\n'+color.cyan('DELETE'))
+    query_debug = query_debug.replace('TRUNCATE', '\n'+color.red('TRUNCATE'))
     query_debug = query_debug.replace('UNION', '\n'+color.blue('UNION'))
     query_debug = query_debug.replace('LEFT JOIN', '\n'+color.yellow('LEFT JOIN'))
     query_debug = query_debug.replace('INNER JOIN', '\n'+color.blue('INNER JOIN'))
@@ -847,3 +853,21 @@ def debug(query, params=[]):
         log.debug(query_debug % params_debug)
 
     return (query, params)
+
+def query(source, params=list(), callback=None):
+    db_ = None
+    row_number = 0
+    try:
+        db_ = db.get()
+        cursor = db_.cursor()
+        cursor.execute(*debug(source, params))
+        if cursor.rowcount > 1 and callback is not None and callable(callback):
+            while True:
+                try:
+                    row_number += 1
+                    callback(cursor.fetchone(), row_number)
+                except TypeError:
+                    break
+    finally:
+        db_.commit()
+        Table.db.put(db_)
