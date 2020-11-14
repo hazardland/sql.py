@@ -25,7 +25,7 @@
 # Installation
 ```
 pip install psycopg2-binary
-pip install pgsql-table
+pip install pgsql-orm
 ```
 
 # Configuration
