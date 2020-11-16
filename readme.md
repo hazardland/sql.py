@@ -25,7 +25,7 @@
 # Installation
 ```
 pip install psycopg2-binary
-pip install pgsql-orm
+pip install postgresql-orm
 ```
 
 # Configuration
@@ -117,7 +117,9 @@ class User:
         self.username = None
         self.fullname = None
         self.status = None
+        self.group_id = None
         self.created_at = None
+        self.group = None
 ```
 Also defining properties is not required as orm creates object properties on the fly, but having them is much more descriptive.
 
