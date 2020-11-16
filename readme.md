@@ -122,15 +122,6 @@ class User:
 Also defining properties is not required as orm creates object properties on the fly, but having them is much more descriptive.
 
 # Model
-
-Let us pause a bit to create a friendly md5 hash function, it might come handy later for hashing passwords:
-```python
-import hashlib
-def md5(plain):
-    return hashlib.md5(plain.encode()).hexdigest()
-```
-*Storing passwords in md5 hashs is not recomended in real world scenario, you should use bcrypt instead.*
-
 We extend sql.Table for our Groups model. The naming goes like this: Class name in singular [ Group ] and model name is in plural [ Group**s** ] as Groups model produces Group class objects:
 ```python
 class Groups(sql.Table):
@@ -161,6 +152,15 @@ class Users(sql.Table):
         'group': {'table':Groups, 'field':'group_id'}
     }
 ```
+
+Let us pause a bit to create a friendly md5 hash function which we used in password encoder:
+```python
+import hashlib
+def md5(plain):
+    return hashlib.md5(plain.encode()).hexdigest()
+```
+*Storing passwords in md5 hashs is not recomended in real world scenario, you should use bcrypt instead.*
+
 
 # Add
 Create some groups by simply calling Groups.add and passing dict type object, where keys of the object are Groups.fields dict keys:
