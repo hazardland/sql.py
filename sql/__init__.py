@@ -808,6 +808,8 @@ class Result():
         self.items.append(item)
 
 def debug(query, params=[]):
+    if params is None:
+        params = []
     params_debug = tuple(["'"+str(param)+"'" for param in params])
 
     query_debug = '\n'
@@ -854,20 +856,18 @@ def debug(query, params=[]):
 
     return (query, params)
 
-def query(source, params=list(), callback=None):
+def query(source, params=None):
     db_ = None
-    row_number = 0
     try:
         db_ = db.get()
         cursor = db_.cursor()
         cursor.execute(*debug(source, params))
-        if cursor.rowcount > 1 and callback is not None and callable(callback):
-            while True:
-                try:
-                    row_number += 1
-                    callback(cursor.fetchone(), row_number)
-                except TypeError:
-                    break
+        log.debug(color.cyan('Total %s'), cursor.rowcount)
+        if cursor.rowcount > 0:
+            result = []
+            for record in cursor:
+                result.append(record)
+            return result
     finally:
         db_.commit()
-        Table.db.put(db_)
+        db.put(db_)
