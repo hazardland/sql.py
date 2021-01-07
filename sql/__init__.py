@@ -440,7 +440,7 @@ class Table(metaclass=MetaTable):
             else:
                 fields.append(field)
 
-        return (', '.join(cls.name+'.'+value for value in fields))
+        return (', '.join(cls.name+'.'+ESCAPE+value+ESCAPE for value in fields))
 
     @classmethod
     def offset(cls):
