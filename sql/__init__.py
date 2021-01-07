@@ -242,14 +242,14 @@ class Table(metaclass=MetaTable):
                     criteria = '%s = ANY('+cls.name+'.'+ESCAPE+column+ESCAPE+')'
                 elif config['type'] == 'json':
                     value = '%'+value+'%'
-                    criteria = cls.name+'.'+ESCAPE+column+ESCAPE+'::text ILIKE %s'
+                    criteria = cls.name+'.'+ESCAPE+column+ESCAPE+'::TEXT ILIKE %s'
                 elif 'options' in config or config['type'] == 'bool':
                     criteria = cls.name+'.'+ESCAPE+column+ESCAPE+'=%s'
                 elif config['type'] == 'int' or config['type'] == 'date' or config['type'] == 'float':
                     criteria = cls.name+'.'+ESCAPE+column+ESCAPE+'=%s'
                 else:
                     value = '%'+value+'%'
-                    criteria = cls.name+'."'+column+"\" ILIKE %s"
+                    criteria = cls.name+'."'+column+"\"::TEXT ILIKE %s"
 
                 if 'array' in config and config['array']:
                     if not isinstance(value, list) and not isinstance(value, tuple):
@@ -261,7 +261,7 @@ class Table(metaclass=MetaTable):
                     if 'options' in config and (isinstance(value, list) or isinstance(value, tuple) or isinstance(value, set)):
                         fields.append(cls.name+'."'+column+"\" IN ("+','.join(['%s'] * len(value))+")")
                         for item in value:
-                            #log.debug(color.cyan('%s'), item)
+                            log.debug(color.cyan('%s'), item)
                             values.append(cls.value(field, item))
                     elif (config['type'] == 'int' or
                         config['type'] == 'date' or
@@ -382,7 +382,7 @@ class Table(metaclass=MetaTable):
                     name = config['field']
                 else:
                     name = field
-                fields.append(name)
+                fields.append(ESCAPE+name+ESCAPE)
 
         return (fields, values)
 
