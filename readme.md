@@ -1,3 +1,6 @@
+[![Downloads](https://pepy.tech/badge/postgresql-orm/month)](https://pepy.tech/project/postgresql-orm)
+[![Downloads](https://pepy.tech/badge/postgresql-orm)](https://pepy.tech/project/postgresql-orm)
+
 <!-- MarkdownTOC autolink=true levels="1" autoanchor="true"-->
 
 - [Installation](#installation)
