@@ -298,7 +298,9 @@ class Table(metaclass=MetaTable):
         return Clause(fields, values, separator=' '+separator+' ', empty='1=1')
 
     @classmethod
-    def order(cls, field=None, method=None, data={}):
+    def order(cls, field=None, method=None, data=None):
+        if data is None:
+            data = {}
         if 'field' in data:
             field = data['field']
         if 'method' in data:
@@ -496,7 +498,9 @@ class Table(metaclass=MetaTable):
 
         #return cls.type(**params)
     @classmethod
-    def get(cls, id, filter={}):
+    def get(cls, id, filter=None):
+        if filter is None:
+            filter = {}
         filter = cls.where(filter)
         join = Join(cls)
         try:
@@ -517,7 +521,13 @@ class Table(metaclass=MetaTable):
             cls.db.put(db)
 
     @classmethod
-    def all(cls, filter={}, order={}, search={}, limit=None):
+    def all(cls, filter=None, order=None, search=None, limit=None):
+        if filter is None:
+            filter = {}
+        if order is None:
+            order = {}
+        if search is None:
+            search = {}
         join = Join(cls, filter, search)
 
         result = []
@@ -550,7 +560,15 @@ class Table(metaclass=MetaTable):
         return result
 
     @classmethod
-    def filter(cls, page=1, limit=100, filter={}, order={}, search={}):
+    def filter(cls, page=1, limit=100, filter=None, order=None, search=None):
+        if filter is None:
+            filter = {}
+        if order is None:
+            order = {}
+        if search is None:
+            search = {}
+
+
         join = Join(cls, filter, search)
         join.row.offset('total')
 
@@ -595,7 +613,10 @@ class Table(metaclass=MetaTable):
         return result
 
     @classmethod
-    def save(cls, id, data, filter={}):
+    def save(cls, id, data, filter=None):
+        if filter is None:
+            filter = {}
+
         filter = cls.where(filter)
         join = Join(cls)
         update = cls.update(data)
@@ -672,7 +693,10 @@ class Table(metaclass=MetaTable):
 
 
     @classmethod
-    def delete(cls, id, filter={}):
+    def delete(cls, id, filter=None):
+        if filter is None:
+            filter = {}
+
         filter = cls.where(filter)
         try:
             db = cls.db.get()
@@ -714,7 +738,14 @@ class Row:
         return self.get(name)
 
 class Join():
-    def __init__(self, table, filter={}, search={}):
+    def __init__(self, table, filter=None, search=None):
+
+        if filter is None:
+            filter = {}
+        if search is None:
+            search = {}
+
+
         self.table = table
 
         self.row = Row()
@@ -778,7 +809,10 @@ class Join():
                 setattr(item, name, join['table'].create(self.row(join['table'].name)))
         return item
 
-    def order(self, field, method, order={}):
+    def order(self, field, method, order=None):
+        if order is None:
+            order = {}
+
         if 'field' in order:
             field = order['field']
         if 'method' in order:
@@ -807,7 +841,7 @@ class Result():
         #log.debug('Adding %s', item)
         self.items.append(item)
 
-def debug(query, params=[]):
+def debug(query, params=None):
     if params is None:
         params = []
     params_debug = tuple(["'"+str(param)+"'" for param in params])
