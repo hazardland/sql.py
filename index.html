@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>postgresql-orm — Model Generator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #0d1117; overflow: hidden; }
+        * { scrollbar-width: thin; scrollbar-color: #30363d #0d1117; }
+        *::-webkit-scrollbar { width: 8px; height: 8px; }
+        *::-webkit-scrollbar-track { background: #0d1117; }
+        *::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+        *::-webkit-scrollbar-thumb:hover { background: #484f58; }
+    </style>
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.2/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+const { useState, useMemo, useCallback, useEffect } = React;
+
+function useIsMobile(breakpoint = 768) {
+  const [mobile, setMobile] = useState(window.innerWidth < breakpoint);
+  useEffect(() => {
+    const onResize = () => setMobile(window.innerWidth < breakpoint);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [breakpoint]);
+  return mobile;
+}
+
+const FIELD_TYPES = ["string", "int", "float", "bool", "date", "json"];
+
+const PG_TYPE_MAP = {
+  string: "TEXT",
+  int: "INTEGER",
+  float: "DOUBLE PRECISION",
+  bool: "BOOLEAN",
+  date: "TIMESTAMP WITHOUT TIME ZONE",
+  json: "JSONB",
+};
+
+const defaultJoinModel = () => ({
+  id: crypto.randomUUID(),
+  name: "",
+  foreignKey: "",
+  refModel: "",
+  refTable: "",
+});
+
+const defaultField = () => ({
+  id: crypto.randomUUID(),
+  name: "",
+  type: "string",
+  dbField: "",
+  array: false,
+  nullable: false,
+  options: "",
+  select: true,
+  insert: true,
+  update: true,
+  keys: "",
+  expanded: false,
+});
+
+const INITIAL_FIELDS = [
+  { id: "f1", name: "id", type: "int", dbField: "", array: false, nullable: false, options: "", select: true, insert: false, update: false, keys: "", expanded: false },
+  { id: "f2", name: "username", type: "string", dbField: "", array: false, nullable: false, options: "", select: true, insert: true, update: true, keys: "", expanded: false },
+  { id: "f3", name: "fullname", type: "string", dbField: "", array: false, nullable: false, options: "", select: true, insert: true, update: true, keys: "", expanded: false },
+  { id: "f4", name: "password", type: "string", dbField: "", array: false, nullable: false, options: "", select: true, insert: true, update: true, keys: "", expanded: false },
+  { id: "f5", name: "status", type: "string", dbField: "", array: false, nullable: false, options: "active, disabled", select: true, insert: true, update: true, keys: "", expanded: false },
+  { id: "f6", name: "group_id", type: "int", dbField: "", array: false, nullable: false, options: "", select: true, insert: true, update: true, keys: "", expanded: false },
+  { id: "f7", name: "created_at", type: "date", dbField: "", array: false, nullable: false, options: "", select: true, insert: true, update: false, keys: "", expanded: false },
+];
+
+const INITIAL_JOINS = [
+  { id: "j1", name: "group", foreignKey: "group_id", refModel: "Groups", refTable: "groups" },
+];
+
+function singularize(name) {
+  if (!name) return "";
+  if (name.endsWith("ies")) return name.slice(0, -3) + "y";
+  if (name.endsWith("ses") || name.endsWith("xes") || name.endsWith("zes")) return name.slice(0, -2);
+  if (name.endsWith("s") && !name.endsWith("ss")) return name.slice(0, -1);
+  return name;
+}
+
+function capitalize(s) {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
+}
+
+function toPascal(name) {
+  return name.split("_").map(capitalize).join("");
+}
+
+function SyntaxPython({ code }) {
+  const highlighted = useMemo(() => {
+    const lines = code.split("\n");
+    return lines.map((line, i) => {
+      let html = line
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+
+      html = html.replace(/(#.*)$/gm, '<span style="color:#6a9955">$1</span>');
+      html = html.replace(/\b(import|from|class|def|return|if|else|elif|for|in|not|and|or|is|None|True|False|self|print|try|except|finally|raise|with|as|lambda)\b/g, '<span style="color:#c586c0">$1</span>');
+      html = html.replace(/\b(str|int|float|bool|dict|list|tuple|set|type)\b(?!\s*=)/g, '<span style="color:#4ec9b0">$1</span>');
+      html = html.replace(/'([^']*)'/g, "'<span style=\"color:#ce9178\">$1</span>'");
+      html = html.replace(/\b(\d+)\b/g, '<span style="color:#b5cea8">$1</span>');
+      html = html.replace(/\b(def|class)\b\s+(\w+)/g, '<span style="color:#c586c0">$1</span> <span style="color:#dcdcaa">$2</span>');
+
+      return `<span style="color:#858585;user-select:none;display:inline-block;width:32px;text-align:right;margin-right:16px">${i + 1}</span>${html}`;
+    });
+  }, [code]);
+
+  return (
+    <pre style={{
+      margin: 0, padding: "20px", overflowX: "auto", fontSize: "13px",
+      lineHeight: "1.65", fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+      color: "#d4d4d4", background: "transparent",
+    }}>
+      {highlighted.map((line, i) => (
+        <div key={i} dangerouslySetInnerHTML={{ __html: line }} style={{ minHeight: "21px" }} />
+      ))}
+    </pre>
+  );
+}
+
+function SyntaxSQL({ code }) {
+  const highlighted = useMemo(() => {
+    const lines = code.split("\n");
+    return lines.map((line, i) => {
+      let html = line
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+
+      html = html.replace(/(--.*$)/gm, '<span style="color:#6a9955">$1</span>');
+      html = html.replace(/\b(CREATE|TABLE|IF|NOT|EXISTS|PRIMARY|KEY|SERIAL|BIGSERIAL|SMALLSERIAL|SMALLINT|INTEGER|BIGINT|VARCHAR|CHAR|TEXT|BOOLEAN|TIMESTAMP|WITHOUT|TIME|ZONE|DOUBLE|PRECISION|JSONB|JSON|DEFAULT|NOW|NULL|REFERENCES|CONSTRAINT|UNIQUE|INDEX|ON|SCHEMA|DROP|CASCADE|INSERT|INTO|VALUES|SELECT|FROM|WHERE|UPDATE|SET|DELETE|LEFT|JOIN|RETURNING|WITH|AS|AND|OR|IN|ORDER|BY|ASC|DESC|LIMIT|OFFSET|COUNT|OVER)\b/gi,
+        (m) => `<span style="color:#569cd6">${m.toUpperCase()}</span>`);
+      html = html.replace(/'([^']*)'/g, "'<span style=\"color:#ce9178\">$1</span>'");
+      html = html.replace(/\b(\d+)\b/g, '<span style="color:#b5cea8">$1</span>');
+
+      return `<span style="color:#858585;user-select:none;display:inline-block;width:32px;text-align:right;margin-right:16px">${i + 1}</span>${html}`;
+    });
+  }, [code]);
+
+  return (
+    <pre style={{
+      margin: 0, padding: "20px", overflowX: "auto", fontSize: "13px",
+      lineHeight: "1.65", fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+      color: "#d4d4d4", background: "transparent",
+    }}>
+      {highlighted.map((line, i) => (
+        <div key={i} dangerouslySetInnerHTML={{ __html: line }} style={{ minHeight: "21px" }} />
+      ))}
+    </pre>
+  );
+}
+
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <button onClick={handleCopy} style={{
+      background: copied ? "#2ea04370" : "#ffffff10",
+      border: "1px solid #ffffff20",
+      color: copied ? "#7ee787" : "#ccc",
+      padding: "5px 14px", borderRadius: "6px", cursor: "pointer",
+      fontSize: "12px", fontFamily: "inherit", transition: "all 0.2s",
+    }}>
+      {copied ? "✓ Copied" : "Copy"}
+    </button>
+  );
+}
+
+function countAdvancedConfig(field) {
+  let count = 0;
+  if (field.dbField) count++;
+  if (field.array) count++;
+  if (field.nullable) count++;
+  if (field.options) count++;
+  if (!field.select) count++;
+  if (!field.insert) count++;
+  if (!field.update) count++;
+  if (field.type === "json" && field.keys) count++;
+  return count;
+}
+
+function FieldRow({ field, index, onChange, onRemove, onToggleExpand }) {
+  const update = (key, val) => onChange(index, { ...field, [key]: val });
+  const configCount = countAdvancedConfig(field);
+
+  return (
+    <div style={{
+      background: "#1a1d23", borderRadius: "8px", border: "1px solid #2a2d35",
+      marginBottom: "8px", overflow: "hidden",
+    }}>
+      <div style={{
+        display: "flex", alignItems: "center", gap: "8px", padding: "10px 12px",
+      }}>
+        <input
+          value={field.name} onChange={(e) => update("name", e.target.value)}
+          placeholder="field name" spellCheck={false}
+          style={{
+            flex: 1, minWidth: 0, background: "#12141a", border: "1px solid #2a2d35",
+            borderRadius: "5px", padding: "7px 10px", color: "#e1e4e8",
+            fontSize: "13px", fontFamily: "'JetBrains Mono', monospace", outline: "none",
+          }}
+        />
+
+        <select value={field.type} onChange={(e) => update("type", e.target.value)}
+          style={{
+            width: "90px", background: "#12141a", border: "1px solid #2a2d35",
+            borderRadius: "5px", padding: "7px 6px", color: "#79b8ff",
+            fontSize: "13px", fontFamily: "'JetBrains Mono', monospace", outline: "none",
+            flexShrink: 0,
+          }}>
+          {FIELD_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+
+        <button onClick={() => onToggleExpand(index)} style={{
+          background: "none", border: "none", color: configCount > 0 ? "#58a6ff" : "#858585", cursor: "pointer",
+          padding: "4px 8px", fontSize: "18px", lineHeight: 1, position: "relative", flexShrink: 0,
+        }}>
+          {field.expanded ? "▾" : "▸"}
+          {configCount > 0 && !field.expanded && (
+            <span style={{
+              position: "absolute", top: "-4px", right: "-4px",
+              minWidth: "16px", height: "16px", borderRadius: "8px",
+              background: "#238636", color: "#fff",
+              fontSize: "10px", fontWeight: 700,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              padding: "0 4px", boxSizing: "border-box",
+              fontFamily: "'Segoe UI', sans-serif",
+            }}>
+              {configCount}
+            </span>
+          )}
+        </button>
+
+        <button onClick={() => onRemove(index)} style={{
+          background: "none", border: "none", color: "#f8514950", cursor: "pointer",
+          padding: "4px 6px", fontSize: "16px", lineHeight: 1, flexShrink: 0,
+        }}
+          onMouseEnter={(e) => e.target.style.color = "#f85149"}
+          onMouseLeave={(e) => e.target.style.color = "#f8514950"}
+        >×</button>
+      </div>
+
+      {field.expanded && (
+        <div style={{
+          padding: "8px 12px 12px 12px",
+          borderTop: "1px solid #2a2d35",
+          display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px",
+        }}>
+          <label style={labelStyle}>
+            <span style={labelText}>DB column name</span>
+            <input value={field.dbField} onChange={(e) => update("dbField", e.target.value)}
+              placeholder="same as field name" spellCheck={false} style={inputStyle} />
+          </label>
+
+          <label style={labelStyle}>
+            <span style={labelText}>Options (comma sep.)</span>
+            <input value={field.options} onChange={(e) => update("options", e.target.value)}
+              placeholder={`e.g. ${field.type === "int" ? "1, 2, 3" : field.type === "float" ? "1.0, 2.5" : "active, disabled"}`}
+              spellCheck={false} style={inputStyle} />
+          </label>
+
+          {field.type === "json" && (
+            <label style={{ ...labelStyle, gridColumn: "1 / -1" }}>
+              <span style={labelText}>JSON keys (comma sep.)</span>
+              <input value={field.keys} onChange={(e) => update("keys", e.target.value)}
+                placeholder="e.g. en, ka, ru" spellCheck={false} style={inputStyle} />
+            </label>
+          )}
+
+          <div style={{ display: "flex", gap: "12px", gridColumn: "1 / -1", flexWrap: "wrap" }}>
+            {[
+              ["array", "Array"],
+              ["nullable", "Null"],
+              ["select", "Select"],
+              ["insert", "Insert"],
+              ["update", "Update"],
+            ].map(([key, label]) => (
+              <label key={key} style={{ display: "flex", alignItems: "center", gap: "5px", color: "#aab0b8", fontSize: "12px", cursor: "pointer", fontFamily: "'JetBrains Mono', 'Fira Code', monospace" }}>
+                <input type="checkbox" checked={field[key]} onChange={(e) => update(key, e.target.checked)}
+                  style={{ accentColor: "#58a6ff" }} />
+                {label}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function JoinRow({ join, index, fields, onChange, onRemove }) {
+  const update = (key, val) => onChange(index, { ...join, [key]: val });
+
+  return (
+    <div style={{
+      background: "#1a1d23", borderRadius: "8px", border: "1px solid #2a2d35",
+      marginBottom: "8px", padding: "10px 12px",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+        <span style={{ color: "#858585", fontSize: "11px", flexShrink: 0 }}>JOIN</span>
+        <input value={join.name} onChange={(e) => update("name", e.target.value)}
+          placeholder="join name" spellCheck={false} style={{ ...inputStyle, flex: 1 }} />
+        <button onClick={() => onRemove(index)} style={{
+          background: "none", border: "none", color: "#f8514950", cursor: "pointer",
+          padding: "4px 6px", fontSize: "16px", lineHeight: 1, flexShrink: 0,
+        }}
+          onMouseEnter={(e) => e.target.style.color = "#f85149"}
+          onMouseLeave={(e) => e.target.style.color = "#f8514950"}
+        >×</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "8px" }}>
+        <label style={labelStyle}>
+          <span style={labelText}>Foreign key</span>
+          <select value={join.foreignKey} onChange={(e) => update("foreignKey", e.target.value)}
+            style={{ ...inputStyle, color: "#79b8ff" }}>
+            <option value="">select field</option>
+            {fields.filter(f => f.name).map((f) => <option key={f.id} value={f.name}>{f.name}</option>)}
+          </select>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+const labelStyle = { display: "flex", flexDirection: "column", gap: "3px" };
+const labelText = { color: "#858585", fontSize: "11px", fontWeight: 500 };
+const inputStyle = {
+  background: "#12141a", border: "1px solid #2a2d35", borderRadius: "5px",
+  padding: "7px 10px", color: "#e1e4e8", fontSize: "13px",
+  fontFamily: "'JetBrains Mono', monospace", outline: "none", width: "100%", boxSizing: "border-box",
+};
+
+const sectionHeading = {
+  color: "#e1e4e8", fontSize: "13px", fontWeight: 600, letterSpacing: "0.5px",
+  textTransform: "uppercase", marginBottom: "10px", marginTop: "20px",
+  display: "flex", alignItems: "center", justifyContent: "space-between",
+};
+
+const addBtnStyle = {
+  background: "#238636", border: "none", color: "#fff", padding: "5px 14px",
+  borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: 500,
+};
+
+function App() {
+  const isMobile = useIsMobile();
+
+  useEffect(() => {
+    const style = document.createElement("style");
+    style.textContent = `
+      * { scrollbar-width: thin; scrollbar-color: #30363d #0d1117; }
+      *::-webkit-scrollbar { width: 8px; height: 8px; }
+      *::-webkit-scrollbar-track { background: #0d1117; }
+      *::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+      *::-webkit-scrollbar-thumb:hover { background: #484f58; }
+    `;
+    document.head.appendChild(style);
+    return () => document.head.removeChild(style);
+  }, []);
+
+  const [tableName, setTableName] = useState("user");
+  const [schema, setSchema] = useState("demo");
+  const [primaryKey, setPrimaryKey] = useState("id");
+  const [className, setClassName] = useState("");
+  const [modelName, setModelName] = useState("");
+  const [fields, setFields] = useState(INITIAL_FIELDS);
+  const [joins, setJoins] = useState(INITIAL_JOINS);
+  const [activeTab, setActiveTab] = useState("python");
+  const [codeTab, setCodeTab] = useState("python");
+
+  const derivedClassName = className || toPascal(singularize(tableName));
+  const derivedModelName = modelName || toPascal(tableName);
+
+  const updateField = useCallback((i, f) => setFields((prev) => { const n = [...prev]; n[i] = f; return n; }), []);
+  const removeField = useCallback((i) => setFields((prev) => prev.filter((_, j) => j !== i)), []);
+  const toggleExpand = useCallback((i) => setFields((prev) => { const n = [...prev]; n[i] = { ...n[i], expanded: !n[i].expanded }; return n; }), []);
+  const addField = useCallback(() => setFields((prev) => [...prev, defaultField()]), []);
+
+  const updateJoin = useCallback((i, j) => setJoins((prev) => { const n = [...prev]; n[i] = j; return n; }), []);
+  const removeJoin = useCallback((i) => setJoins((prev) => prev.filter((_, j) => j !== i)), []);
+  const addJoin = useCallback(() => setJoins((prev) => [...prev, defaultJoinModel()]), []);
+
+  const pythonCode = useMemo(() => {
+    const lines = [];
+    lines.push(`# ${tableName}.py`);
+    lines.push("");
+    lines.push("import sql");
+
+    // Joined imports
+    const validJoins = joins.filter((j) => j.name && j.foreignKey);
+    for (const j of validJoins) {
+      lines.push(`import ${j.name}`);
+    }
+    lines.push("");
+
+    // Data class
+    lines.push(`class ${derivedClassName}:`);
+    lines.push(`    def __init__(self):`);
+    const validFields = fields.filter((f) => f.name);
+    if (validFields.length === 0) {
+      lines.push(`        pass`);
+    } else {
+      for (const f of validFields) {
+        lines.push(`        self.${f.name} = None`);
+      }
+      for (const j of validJoins) {
+        lines.push(`        self.${j.name} = None`);
+      }
+    }
+    lines.push("");
+
+    // Model class — always called Table
+    lines.push(`class Table(sql.Table):`);
+    if (schema) lines.push(`    schema = '${schema}'`);
+    lines.push(`    name = '${tableName}'`);
+    if (primaryKey !== "id") lines.push(`    id = '${primaryKey}'`);
+    lines.push(`    type = ${derivedClassName}`);
+    lines.push(`    fields = {`);
+    for (const f of validFields) {
+      const opts = [];
+      if (f.type !== "string") opts.push(`'type': '${f.type}'`);
+      if (f.dbField) opts.push(`'field': '${f.dbField}'`);
+      if (f.array) opts.push(`'array': True`);
+      if (f.nullable) opts.push(`'null': True`);
+      if (f.options) {
+        const items = f.options.split(",").map((s) => {
+          const v = s.trim();
+          if (f.type === "int" || f.type === "float") return v;
+          if (f.type === "bool") return v;
+          return `'${v}'`;
+        }).join(", ");
+        opts.push(`'options': [${items}]`);
+      }
+      if (!f.select) opts.push(`'select': False`);
+      if (!f.insert) opts.push(`'insert': False`);
+      if (!f.update) opts.push(`'update': False`);
+      if (f.type === "json" && f.keys) {
+        const items = f.keys.split(",").map((s) => `'${s.trim()}'`).join(", ");
+        opts.push(`'keys': [${items}]`);
+      }
+      lines.push(`        '${f.name}': {${opts.join(", ")}},`);
+    }
+    lines.push(`    }`);
+
+    if (validJoins.length > 0) {
+      lines.push(`    joins = {`);
+      for (const j of validJoins) {
+        lines.push(`        '${j.name}': {'table': ${j.name}.Table, 'field': '${j.foreignKey}'},`);
+      }
+      lines.push(`    }`);
+    }
+    lines.push("");
+
+    // CRUD wrapper functions
+    lines.push("");
+    lines.push("def get(id):");
+    lines.push("    return Table.get(id)");
+    lines.push("");
+    lines.push("def add(data):");
+    lines.push("    return Table.add(data)");
+    lines.push("");
+    lines.push("def save(id, data):");
+    lines.push("    return Table.save(id, data)");
+    lines.push("");
+    lines.push("def delete(id):");
+    lines.push("    return Table.delete(id)");
+    lines.push("");
+    lines.push("def filter(page=1, limit=100, filter={}, order={}, search={}):");
+    lines.push("    return Table.filter(");
+    lines.push("        page=page,");
+    lines.push("        limit=limit,");
+    lines.push("        filter=filter,");
+    lines.push("        order=order,");
+    lines.push("        search=search,");
+    lines.push("    )");
+    lines.push("");
+
+    // Commented usage examples
+    const insertFields = validFields.filter((f) => f.insert && f.name !== primaryKey);
+    if (insertFields.length > 0) {
+      const obj = derivedClassName.toLowerCase();
+      lines.push("");
+      lines.push("# --- Example Usage ---");
+      lines.push("");
+      lines.push(`# ${obj} = add({`);
+      for (const f of insertFields) {
+        const example = f.type === "int" ? "1" : f.type === "float" ? "1.0" : f.type === "bool" ? "True" : f.type === "date" ? "'2024-01-01'" : f.type === "json" ? "{}" : f.options ? `'${f.options.split(",")[0].trim()}'` : `'...'`;
+        lines.push(`#     '${f.name}': ${example},`);
+      }
+      lines.push(`# })`);
+      lines.push("");
+      lines.push(`# ${obj} = get(1)`);
+      if (validJoins.length > 0) {
+        lines.push(`# print(${obj}.${validJoins[0].name}.id)`);
+      }
+      lines.push("");
+      lines.push(`# ${obj} = save(1, {'${validFields.find(f => f.update && f.name !== primaryKey)?.name || 'field'}': 'value'})`);
+      lines.push("");
+      lines.push(`# delete(1)`);
+      lines.push("");
+      lines.push(`# result = filter(`);
+      lines.push(`#     page=1,`);
+      lines.push(`#     limit=25,`);
+      if (validFields.some((f) => f.options)) {
+        const optField = validFields.find((f) => f.options);
+        lines.push(`#     filter={'${optField.name}': '${optField.options.split(",")[0].trim()}'},`);
+      }
+      lines.push(`#     order={'field': '${primaryKey}', 'method': 'desc'},`);
+      if (validFields.some((f) => f.type === "string" && !f.options && f.name !== primaryKey)) {
+        const searchField = validFields.find((f) => f.type === "string" && !f.options && f.name !== primaryKey);
+        lines.push(`#     search={'${searchField.name}': 'query'},`);
+      }
+      lines.push(`# )`);
+      lines.push(`# print(result.total)`);
+      lines.push(`# for item in result.items:`);
+      lines.push(`#     print(item.${primaryKey})`);
+    }
+
+    return lines.join("\n");
+  }, [tableName, schema, primaryKey, derivedClassName, derivedModelName, fields, joins]);
+
+  const sqlCode = useMemo(() => {
+    const lines = [];
+    const validFields = fields.filter((f) => f.name);
+    const validJoins = joins.filter((j) => j.name);
+    const schemaPrefix = schema ? `${schema}.` : "";
+
+    // Main table
+    lines.push(`CREATE TABLE IF NOT EXISTS ${schemaPrefix}${tableName} (`);
+    const colLines = [];
+    for (const f of validFields) {
+      const colName = f.dbField || f.name;
+      let pgType = PG_TYPE_MAP[f.type] || "VARCHAR(255)";
+
+      if (f.name === primaryKey) {
+        if (f.type === "int") pgType = "BIGSERIAL";
+        colLines.push(`    ${colName} ${pgType} PRIMARY KEY NOT NULL`);
+      } else {
+        if (f.array) pgType += "[]";
+
+        // Check if it's a foreign key
+        const joinRef = validJoins.find((j) => j.foreignKey === f.name);
+        let line = `    ${colName} ${pgType}`;
+        if (f.options) line += ` CHECK (${colName} IN (${f.options.split(",").map((s) => `'${s.trim()}'`).join(", ")}))`;
+        if (joinRef) line += ` REFERENCES ${schemaPrefix}${joinRef.name}(id)`;
+        if (f.name === "created_at") line += ` DEFAULT NOW()`;
+        colLines.push(line);
+      }
+    }
+    lines.push(colLines.join(",\n"));
+    lines.push(`);`);
+
+    return lines.join("\n");
+  }, [tableName, schema, primaryKey, fields, joins]);
+
+  const configPanel = (
+    <div style={{ padding: "12px 16px" }}>
+      <div style={sectionHeading}><span>Table</span></div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+        <label style={labelStyle}>
+          <span style={labelText}>Table name</span>
+          <input value={tableName} onChange={(e) => setTableName(e.target.value)}
+            spellCheck={false} style={inputStyle} />
+        </label>
+        <label style={labelStyle}>
+          <span style={labelText}>Schema</span>
+          <input value={schema} onChange={(e) => setSchema(e.target.value)}
+            placeholder="optional" spellCheck={false} style={inputStyle} />
+        </label>
+        <label style={labelStyle}>
+          <span style={labelText}>Class name</span>
+          <input value={className} onChange={(e) => setClassName(e.target.value)}
+            placeholder={toPascal(singularize(tableName))} spellCheck={false} style={inputStyle} />
+        </label>
+        <label style={labelStyle}>
+          <span style={labelText}>Primary key</span>
+          <input value={primaryKey} onChange={(e) => setPrimaryKey(e.target.value)}
+            spellCheck={false} style={inputStyle} />
+        </label>
+      </div>
+
+      <div style={sectionHeading}>
+        <span>Fields</span>
+        <button onClick={addField} style={addBtnStyle}>+ Field</button>
+      </div>
+      {fields.map((f, i) => (
+        <FieldRow key={f.id} field={f} index={i}
+          onChange={updateField} onRemove={removeField} onToggleExpand={toggleExpand} />
+      ))}
+
+      <div style={sectionHeading}>
+        <span>Joins</span>
+        <button onClick={addJoin} style={addBtnStyle}>+ Join</button>
+      </div>
+      {joins.length === 0 && (
+        <div style={{ color: "#484f58", fontSize: "13px", padding: "8px 0" }}>
+          No joins defined
+        </div>
+      )}
+      {joins.map((j, i) => (
+        <JoinRow key={j.id} join={j} index={i} fields={fields}
+          onChange={updateJoin} onRemove={removeJoin} />
+      ))}
+    </div>
+  );
+
+  const codePanel = (
+    <div style={{ display: "flex", flexDirection: "column", overflow: "hidden", height: "100%" }}>
+      <div style={{
+        display: "flex", alignItems: "center", borderBottom: "1px solid #21262d",
+        padding: "0 12px",
+      }}>
+        {[["python", "Python"], ["sql", "SQL"]].map(([key, label]) => (
+          <button key={key} onClick={() => isMobile ? setActiveTab(key) : setCodeTab(key)} style={{
+            background: "none", border: "none",
+            borderBottom: (isMobile ? activeTab : codeTab) === key ? "2px solid #58a6ff" : "2px solid transparent",
+            color: (isMobile ? activeTab : codeTab) === key ? "#e1e4e8" : "#8b949e",
+            padding: "10px 14px", cursor: "pointer", fontSize: "13px", fontWeight: 500,
+            fontFamily: "inherit", transition: "all 0.15s",
+          }}>
+            {label}
+          </button>
+        ))}
+        <div style={{ flex: 1 }} />
+        <CopyButton text={(isMobile ? activeTab : codeTab) === "python" ? pythonCode : sqlCode} />
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", overflowX: "auto" }}>
+        {(isMobile ? activeTab : codeTab) === "sql"
+          ? <SyntaxSQL code={sqlCode} />
+          : <SyntaxPython code={pythonCode} />}
+      </div>
+    </div>
+  );
+
+  // --- MOBILE: 3 tabs (Config / Python / SQL) ---
+  if (isMobile) {
+    return (
+      <div style={{
+        minHeight: "100vh", background: "#0d1117", color: "#e1e4e8",
+        fontFamily: "'Segoe UI', -apple-system, sans-serif",
+      }}>
+        <div style={{
+          padding: "12px 16px", borderBottom: "1px solid #21262d",
+          display: "flex", alignItems: "center", gap: "10px",
+        }}>
+          <div style={{ fontSize: "16px", fontWeight: 700, color: "#58a6ff" }}>postgresql-orm</div>
+          <div style={{ fontSize: "12px", color: "#8b949e" }}>Model Generator</div>
+        </div>
+
+        <div style={{
+          display: "flex", alignItems: "center", borderBottom: "1px solid #21262d",
+          padding: "0 12px", position: "sticky", top: 0, background: "#0d1117", zIndex: 10,
+        }}>
+          {[["config", "Config"], ["python", "Python"], ["sql", "SQL"]].map(([key, label]) => (
+            <button key={key} onClick={() => setActiveTab(key)} style={{
+              background: "none", border: "none",
+              borderBottom: activeTab === key ? "2px solid #58a6ff" : "2px solid transparent",
+              color: activeTab === key ? "#e1e4e8" : "#8b949e",
+              padding: "10px 14px", cursor: "pointer", fontSize: "13px", fontWeight: 500,
+              fontFamily: "inherit", transition: "all 0.15s",
+            }}>
+              {label}
+            </button>
+          ))}
+          <div style={{ flex: 1 }} />
+          {activeTab !== "config" && (
+            <CopyButton text={activeTab === "python" ? pythonCode : sqlCode} />
+          )}
+        </div>
+
+        {activeTab === "config" && configPanel}
+        {(activeTab === "python" || activeTab === "sql") && (
+          <div style={{ overflowX: "auto" }}>
+            {activeTab === "sql" ? <SyntaxSQL code={sqlCode} /> : <SyntaxPython code={pythonCode} />}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // --- DESKTOP: 3 columns (Config | Python | SQL) ---
+  return (
+    <div style={{
+      height: "100vh", background: "#0d1117", color: "#e1e4e8",
+      fontFamily: "'Segoe UI', -apple-system, sans-serif",
+      display: "flex", flexDirection: "column",
+    }}>
+      <div style={{
+        padding: "12px 20px", borderBottom: "1px solid #21262d",
+        display: "flex", alignItems: "center", gap: "10px", flexShrink: 0,
+      }}>
+        <div style={{ fontSize: "17px", fontWeight: 700, color: "#58a6ff" }}>postgresql-orm</div>
+        <div style={{ fontSize: "12px", color: "#8b949e" }}>Model Generator</div>
+      </div>
+
+      <div style={{
+        display: "grid", gridTemplateColumns: "minmax(280px, 380px) 1fr 1fr",
+        flex: 1, overflow: "hidden",
+      }}>
+        {/* Config */}
+        <div style={{
+          borderRight: "1px solid #21262d",
+          overflowY: "auto",
+        }}>
+          {configPanel}
+        </div>
+
+        {/* Python */}
+        <div style={{
+          borderRight: "1px solid #21262d",
+          display: "flex", flexDirection: "column", overflow: "hidden",
+        }}>
+          <div style={{
+            display: "flex", alignItems: "center",
+            padding: "0 12px", borderBottom: "1px solid #21262d", flexShrink: 0,
+          }}>
+            <span style={{ color: "#e1e4e8", fontSize: "13px", fontWeight: 500, padding: "10px 4px" }}>Python</span>
+            <div style={{ flex: 1 }} />
+            <CopyButton text={pythonCode} />
+          </div>
+          <div style={{ flex: 1, overflowY: "auto", overflowX: "auto" }}>
+            <SyntaxPython code={pythonCode} />
+          </div>
+        </div>
+
+        {/* SQL */}
+        <div style={{
+          display: "flex", flexDirection: "column", overflow: "hidden",
+        }}>
+          <div style={{
+            display: "flex", alignItems: "center",
+            padding: "0 12px", borderBottom: "1px solid #21262d", flexShrink: 0,
+          }}>
+            <span style={{ color: "#e1e4e8", fontSize: "13px", fontWeight: 500, padding: "10px 4px" }}>SQL</span>
+            <div style={{ flex: 1 }} />
+            <CopyButton text={sqlCode} />
+          </div>
+          <div style={{ flex: 1, overflowY: "auto", overflowX: "auto" }}>
+            <SyntaxSQL code={sqlCode} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+</body>
+</html>

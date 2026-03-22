@@ -3,7 +3,9 @@
 [![Downloads](https://pepy.tech/badge/postgresql-orm/month)](https://pepy.tech/project/postgresql-orm)
 [![Downloads](https://pepy.tech/badge/postgresql-orm)](https://pepy.tech/project/postgresql-orm)
 
-![Query debug output](https://raw.githubusercontent.com/hazardland/sql.py/master/images/query.png)
+[![Interactive Model Builder](https://raw.githubusercontent.com/hazardland/sql.py/master/images/builder.png)](https://hazardland.github.io/sql.py/)
+
+**[Open Interactive Model Builder](https://hazardland.github.io/sql.py/)** — build your data class, Table model, CRUD functions, and CREATE TABLE script from an interactive configurator. No coding required to get started.
 
 A lightweight Python ORM for PostgreSQL built on top of `psycopg2`. Define your tables as Python classes, and the library handles query generation, type casting, filtering, pagination, joins, and object mapping — all through clean, minimal configuration.
 
@@ -1057,6 +1059,31 @@ finally:
         db.commit()
         Users.db.put(db)
 ```
+
+---
+
+## Why PostgreSQL Only
+
+This ORM generates PostgreSQL-specific SQL by design. Every core feature relies on capabilities that other databases either lack or implement differently. This is an intentional trade-off: by targeting one database, every query is optimal.
+
+Here's what breaks if you try to use the same patterns with MySQL or SQLite:
+
+| Feature | Used In | PostgreSQL | MySQL | SQLite |
+|---------|---------|:----------:|:-----:|:------:|
+| `RETURNING` | add, save (CTE single-query pattern) | ✓ | ✗ | ✓ (3.35+) |
+| CTE (`WITH ... AS`) | add, save | ✓ | ✓ (8.0+) | ✓ (3.8.3+) |
+| `COUNT(*) OVER()` | filter (pagination without count query) | ✓ | ✓ (8.0+) | ✓ (3.25+) |
+| `ILIKE` | where (case-insensitive string search) | ✓ | ✗ | ✗ |
+| `ANY()` | where (array field filtering) | ✓ | ✗ | ✗ |
+| Array types (`TEXT[]`, `INT[]`) | array fields | ✓ | ✗ | ✗ |
+| `JSONB` + `::TEXT` cast | where (JSON search), order (JSON keys) | ✓ | ✗ | ✗ |
+| `psycopg2` connection driver | all database access | ✓ | ✗ | ✗ |
+
+**MySQL** is missing `RETURNING`, which kills the core single-query architecture. Without it, insert and update would require separate SELECT queries — exactly the multi-query pattern this ORM was built to eliminate. MariaDB (10.5+) does support `RETURNING`, making it theoretically closer to compatibility.
+
+**SQLite** has `RETURNING` and CTEs, but lacks `ILIKE`, `ANY()`, array types, and JSONB — so filtering, searching, and array/JSON fields would all break. It also uses a completely different connection library.
+
+The `psycopg2` driver dependency means neither MySQL nor SQLite can even connect without rewriting the `Db` class. This is PostgreSQL-native by design, not by accident.
 
 ---
 
