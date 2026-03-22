@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(name='postgresql-orm',
       description='Easyest PostgreSQL ORM',
-      long_description=open("README.md").read(),
+      long_description=open("readme.md").read(),
       long_description_content_type="text/markdown",
       author='Vakhtang Zardiashvili',
       author_email='hazardland@gmail.com',
