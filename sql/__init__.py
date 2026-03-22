@@ -897,7 +897,8 @@ def query(source, params=None):
         cursor = db_.cursor()
         cursor.execute(*debug(source, params))
         log.debug(color.cyan('Total %s'), cursor.rowcount)
-        if cursor.rowcount > 0:
+        # if cursor.rowcount > 0:
+        if cursor.description:
             result = []
             for record in cursor:
                 result.append(record)
