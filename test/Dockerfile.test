@@ -1,0 +1,5 @@
+FROM python:3.10-slim
+
+RUN pip install --no-cache-dir psycopg2-binary python-dateutil pytest pytest-cov
+
+CMD ["sh", "-c", "pip install -e /repo --quiet && cd /repo/test && pytest"]

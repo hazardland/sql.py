@@ -1,5 +1,6 @@
 # postgresql-orm
 
+[![tests](https://github.com/hazardland/sql.py/actions/workflows/tests.yml/badge.svg)](https://github.com/hazardland/sql.py/actions/workflows/tests.yml)
 [![Downloads](https://pepy.tech/badge/postgresql-orm/month)](https://pepy.tech/project/postgresql-orm)
 [![Downloads](https://pepy.tech/badge/postgresql-orm)](https://pepy.tech/project/postgresql-orm)
 
